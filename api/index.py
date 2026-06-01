@@ -1,11 +1,12 @@
 """
-Telegram webhook — https://YOUR_DOMAIN.vercel.app/api/bot
-Vercel: папка api/bot/ → маршрут /api/bot
+Vercel entrypoint: файл api/index.py → базовый URL /api
+
+  GET/POST  /api/bot     — Telegram webhook
+  GET       /api/health  — проверка деплоя
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
@@ -14,8 +15,7 @@ import sys
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 
-# Корень репозитория (пакет bot/ — не путать с api/bot/)
-_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
@@ -54,12 +54,22 @@ def _get_bot() -> NeuroCarouselBot:
 
 
 @app.get("/")
+async def api_root() -> PlainTextResponse:
+    return PlainTextResponse("NeuroCarousel API — use /api/bot and /api/health")
+
+
+@app.get("/health")
 async def health() -> PlainTextResponse:
+    return PlainTextResponse("API functions work on Vercel")
+
+
+@app.get("/bot")
+async def bot_health() -> PlainTextResponse:
     return PlainTextResponse("NeuroCarousel bot is alive!")
 
 
-@app.post("/")
-async def webhook(request: Request) -> PlainTextResponse:
+@app.post("/bot")
+async def bot_webhook(request: Request) -> PlainTextResponse:
     try:
         update = await request.json()
         logger.info("Update: %s", json.dumps(update, ensure_ascii=False)[:300])

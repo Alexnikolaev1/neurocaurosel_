@@ -131,6 +131,7 @@ def main() -> int:
         print()
         print("Проверь деплой в браузере (должно быть «NeuroCarousel bot is alive!»):")
         print(f"   {webhook_url}")
+        print(f"   {vercel_url.rstrip('/')}/api/health")
         return 0
 
     print(f"❌ Telegram ответил: {result}")
