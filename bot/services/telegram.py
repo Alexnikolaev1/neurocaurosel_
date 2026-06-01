@@ -79,6 +79,29 @@ class TelegramClient:
             logger.error("sendMediaGroup failed: %s", data)
         return data
 
+    async def send_photo(
+        self,
+        chat_id: int,
+        photo: bytes,
+        caption: str,
+        *,
+        parse_mode: str = "HTML",
+    ) -> dict:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            r = await client.post(
+                self._url("sendPhoto"),
+                data={
+                    "chat_id": str(chat_id),
+                    "caption": caption[:1024],
+                    "parse_mode": parse_mode,
+                },
+                files={"photo": ("slide.jpg", photo, "image/jpeg")},
+            )
+        data = r.json()
+        if not data.get("ok"):
+            logger.warning("sendPhoto error: %s", data.get("description", data))
+        return data
+
     async def send_chat_action(self, chat_id: int, action: str = "upload_photo") -> None:
         await self._post("sendChatAction", json={"chat_id": chat_id, "action": action})
 

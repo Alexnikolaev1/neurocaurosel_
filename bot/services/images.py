@@ -21,6 +21,10 @@ class ImageGenerator:
         self._headers = {"Authorization": f"Bearer {settings.hf_key}"}
 
     async def generate(self, prompt: str) -> bytes | None:
+        if self._settings.pollinations_only:
+            image = await self._generate_pollinations(prompt)
+            return self._optimize(image) if image else None
+
         image = await self._generate_hf(prompt)
         if image:
             return self._optimize(image)

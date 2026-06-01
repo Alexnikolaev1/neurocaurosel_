@@ -1,7 +1,5 @@
 """
 Telegram webhook — POST/GET https://YOUR_DOMAIN.vercel.app/api/bot
-
-Vercel Python: класс handler (BaseHTTPRequestHandler), без FastAPI.
 """
 
 from __future__ import annotations
@@ -12,6 +10,7 @@ import json
 import logging
 import os
 import sys
+import threading
 from http.server import BaseHTTPRequestHandler
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -25,10 +24,10 @@ logging.basicConfig(
 logger = logging.getLogger("neurocarousel.webhook")
 
 _bot = None
+_bot_lock = threading.Lock()
 
 
 def _load_bot_class():
-    """Импорт без конфликта имени модуля api/bot.py с пакетом bot/."""
     path = os.path.join(_ROOT, "bot", "neuro_carousel.py")
     spec = importlib.util.spec_from_file_location("nc_neuro_carousel", path)
     if spec is None or spec.loader is None:
@@ -40,20 +39,29 @@ def _load_bot_class():
 
 def _get_bot():
     global _bot
-    if _bot is None:
-        token = os.environ.get("TELEGRAM_TOKEN", "")
-        gemini_key = os.environ.get("GEMINI_API_KEY", "")
-        hf_key = os.environ.get("HF_API_KEY", "")
-        missing = [n for n, v in (
-            ("TELEGRAM_TOKEN", token),
-            ("GEMINI_API_KEY", gemini_key),
-            ("HF_API_KEY", hf_key),
-        ) if not v]
-        if missing:
-            raise RuntimeError(f"Missing env on Vercel: {', '.join(missing)}")
-        BotClass = _load_bot_class()
-        _bot = BotClass(token=token, gemini_key=gemini_key, hf_key=hf_key)
-    return _bot
+    with _bot_lock:
+        if _bot is None:
+            token = os.environ.get("TELEGRAM_TOKEN", "")
+            gemini_key = os.environ.get("GEMINI_API_KEY", "")
+            hf_key = os.environ.get("HF_API_KEY", "")
+            missing = [n for n, v in (
+                ("TELEGRAM_TOKEN", token),
+                ("GEMINI_API_KEY", gemini_key),
+                ("HF_API_KEY", hf_key),
+            ) if not v]
+            if missing:
+                raise RuntimeError(f"Missing env on Vercel: {', '.join(missing)}")
+            BotClass = _load_bot_class()
+            _bot = BotClass(token=token, gemini_key=gemini_key, hf_key=hf_key)
+        return _bot
+
+
+def _process_update(update: dict) -> None:
+    try:
+        bot = _get_bot()
+        asyncio.run(bot.handle_update(update))
+    except Exception:
+        logger.exception("Background processing failed")
 
 
 class handler(BaseHTTPRequestHandler):
@@ -70,12 +78,17 @@ class handler(BaseHTTPRequestHandler):
             update = json.loads(body)
             logger.info("Update: %s", json.dumps(update, ensure_ascii=False)[:300])
 
-            bot = _get_bot()
-            asyncio.run(bot.handle_update(update))
-
+            # Сразу 200 — иначе Telegram шлёт повторные webhook (504/дубли)
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"OK")
+
+            thread = threading.Thread(
+                target=_process_update,
+                args=(update,),
+                daemon=True,
+            )
+            thread.start()
         except Exception:
             logger.exception("Webhook error")
             self.send_response(500)

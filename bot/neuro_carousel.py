@@ -6,7 +6,7 @@ NeuroCarousel — публичный фасад бота.
 
 from __future__ import annotations
 
-from bot.config import Settings
+from bot.config import build_settings
 from bot.handlers.updates import UpdateRouter
 
 
@@ -14,7 +14,7 @@ class NeuroCarouselBot:
     """Thin facade delegating to UpdateRouter."""
 
     def __init__(self, token: str, gemini_key: str, hf_key: str) -> None:
-        settings = Settings(
+        settings = build_settings(
             telegram_token=token,
             gemini_key=gemini_key,
             hf_key=hf_key,

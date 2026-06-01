@@ -6,6 +6,10 @@ import os
 from dataclasses import dataclass
 
 
+def _is_vercel() -> bool:
+    return bool(os.getenv("VERCEL") or os.getenv("VERCEL_ENV"))
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     telegram_token: str
@@ -29,21 +33,53 @@ class Settings:
         "gemini-1.5-flash",
         "gemini-2.0-flash",
     )
+    serverless_mode: bool = False
+    pollinations_only: bool = False
+    function_timeout_sec: float = 55.0
 
     @classmethod
     def from_env(cls) -> Settings:
-        models_raw = os.getenv(
-            "GEMINI_MODELS",
-            "gemini-2.0-flash-lite,gemini-1.5-flash,gemini-2.0-flash",
-        )
-        return cls(
+        return build_settings(
             telegram_token=_require("TELEGRAM_TOKEN"),
             gemini_key=_require("GEMINI_API_KEY"),
             hf_key=_require("HF_API_KEY"),
-            slides_count=int(os.getenv("SLIDES_COUNT", "10")),
-            default_style=os.getenv("DEFAULT_STYLE", "cinematic"),
-            gemini_models=tuple(m.strip() for m in models_raw.split(",") if m.strip()),
         )
+
+
+def build_settings(
+    *,
+    telegram_token: str,
+    gemini_key: str,
+    hf_key: str,
+) -> Settings:
+    models_raw = os.getenv(
+        "GEMINI_MODELS",
+        "gemini-2.0-flash-lite,gemini-1.5-flash,gemini-2.0-flash",
+    )
+    vercel = _is_vercel()
+    serverless = os.getenv("SERVERLESS_MODE", "1" if vercel else "0") == "1"
+
+    default_slides = "5" if serverless else "10"
+    slides = int(os.getenv("SLIDES_COUNT", default_slides))
+
+    pollinations_only = os.getenv("POLLINATIONS_ONLY", "1" if serverless else "0") == "1"
+    between_delay = float(os.getenv("HF_BETWEEN_DELAY", "0.5" if serverless else "2.5"))
+
+    timeout = float(os.getenv("FUNCTION_TIMEOUT_SEC", "55" if serverless else "300"))
+
+    return Settings(
+        telegram_token=telegram_token,
+        gemini_key=gemini_key,
+        hf_key=hf_key,
+        slides_count=slides,
+        default_style=os.getenv("DEFAULT_STYLE", "cinematic"),
+        gemini_models=tuple(m.strip() for m in models_raw.split(",") if m.strip()),
+        serverless_mode=serverless,
+        pollinations_only=pollinations_only,
+        hf_between_delay=between_delay,
+        function_timeout_sec=timeout,
+        image_max_size=int(os.getenv("IMAGE_MAX_SIZE", "1024" if serverless else "1280")),
+    )
 
 
 def _require(name: str) -> str:
@@ -67,7 +103,6 @@ POLLINATIONS_URL = (
     "https://image.pollinations.ai/prompt/{prompt}?width=1024&height=1024&nologo=true"
 )
 
-# Visual style presets appended to every image prompt
 STYLE_PRESETS: dict[str, str] = {
     "cinematic": "cinematic lighting, high quality, detailed, vibrant colors, 8k",
     "minimal": "minimalist flat design, clean composition, soft pastel palette, modern",
