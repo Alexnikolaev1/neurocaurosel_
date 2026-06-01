@@ -28,7 +28,7 @@ class Settings:
     scenario_cache_max: int = 200
     default_style: str = "cinematic"
     gemini_retry_count: int = 2
-    gemini_retry_base_delay: float = 2.0
+    gemini_retry_base_delay: float = 3.0
     gemini_models: tuple[str, ...] = (
         "gemini-2.0-flash",
         "gemini-2.0-flash-lite",

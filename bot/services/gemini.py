@@ -13,7 +13,6 @@ from bot.utils import extract_json_array
 
 logger = logging.getLogger("neurocarousel.gemini")
 
-# Модели, снятые с API — пропускаем даже если указаны в GEMINI_MODELS
 _DEPRECATED_MODELS = frozenset({
     "gemini-1.5-flash",
     "gemini-1.5-pro",
@@ -36,14 +35,12 @@ class ScenarioGenerator:
 
     def _models(self) -> list[str]:
         if self._settings.serverless_mode:
-            # На Vercel — одна быстрая модель, без перебора
-            return ["gemini-2.0-flash-lite"]
+            return ["gemini-2.0-flash-lite", "gemini-2.0-flash"]
 
         seen: set[str] = set()
         result: list[str] = []
         for name in self._settings.gemini_models:
             if name in _DEPRECATED_MODELS:
-                logger.warning("Skipping deprecated Gemini model: %s", name)
                 continue
             if name not in seen:
                 seen.add(name)
@@ -61,22 +58,12 @@ class ScenarioGenerator:
         count = self._settings.slides_count
 
         prompt = f"""
-Ты — креативный директор соцсетей. Придумай нейрокарусель из {count} слайдов на тему: «{topic}».
+Придумай нейрокарусель из {count} слайдов на тему: «{topic}».
+Один общий сюжет от обложки до финала. Язык caption: {language}.
+image_prompt — на английском, стиль: {style_hint}.
 
-Требования:
-- Все {count} слайдов — ОДИН общий сюжет (не начинай тему заново на середине).
-- Слайды связаны единой прогрессией от обложки к финалу.
-- caption — живая, вовлекающая подпись на языке темы ({language}). 1–3 предложения, без хэштегов.
-- image_prompt — детальный промт для Stable Diffusion XL на АНГЛИЙСКОМ. Стиль: {style_hint}. Без имён реальных людей и брендов.
-- Первый слайд — яркая обложка (hook), последний — вывод или призыв к действию.
-- Каждый image_prompt описывает уникальную сцену, но в единой стилистике.
-
-Верни ТОЛЬКО валидный JSON-массив из ровно {count} объектов:
-[
-  {{"slide": 1, "caption": "...", "image_prompt": "..."}},
-  ...
-  {{"slide": {count}, "caption": "...", "image_prompt": "..."}}
-]
+Верни ТОЛЬКО JSON-массив из {count} объектов:
+[{{"slide":1,"caption":"...","image_prompt":"..."}}, ...]
 """.strip()
 
         payload = {
@@ -90,35 +77,32 @@ class ScenarioGenerator:
 
         last_status: int | None = None
         models = self._models()
+        retries = self._settings.gemini_retry_count
 
         for model in models:
             url = gemini_url(model, self._settings.gemini_key)
-            for attempt in range(1, self._settings.gemini_retry_count + 1):
+            hit_429 = False
+
+            for attempt in range(1, retries + 1):
                 logger.info("Gemini %s attempt %d for: %s", model, attempt, topic[:60])
                 try:
-                    req_timeout = 40.0 if self._settings.serverless_mode else 60.0
+                    req_timeout = 35.0 if self._settings.serverless_mode else 60.0
                     r = await self._http.post(url, json=payload, timeout=req_timeout)
                     last_status = r.status_code
 
-                    # Модель не существует — сразу следующая, без ретраев
                     if r.status_code in (404, 400):
-                        logger.warning(
-                            "Gemini %s HTTP %s, skip model: %s",
-                            model,
-                            r.status_code,
-                            r.text[:200],
-                        )
+                        logger.warning("Gemini %s HTTP %s, skip", model, r.status_code)
                         break
 
                     if r.status_code == 429:
-                        wait = self._settings.gemini_retry_base_delay * (2 ** (attempt - 1))
+                        hit_429 = True
+                        wait = min(20.0, self._settings.gemini_retry_base_delay * (2 ** attempt))
                         logger.warning("Gemini 429 on %s, wait %.1fs", model, wait)
                         await asyncio.sleep(wait)
                         continue
 
                     if r.status_code in (503, 500):
                         wait = self._settings.gemini_retry_base_delay * attempt
-                        logger.warning("Gemini %s on %s, wait %.1fs", r.status_code, model, wait)
                         await asyncio.sleep(wait)
                         continue
 
@@ -128,25 +112,24 @@ class ScenarioGenerator:
                 except httpx.HTTPStatusError as exc:
                     last_status = exc.response.status_code
                     if exc.response.status_code in (404, 400):
-                        logger.warning("Gemini %s HTTP %s, skip", model, last_status)
                         break
                     if exc.response.status_code == 429:
-                        wait = self._settings.gemini_retry_base_delay * (2 ** (attempt - 1))
+                        hit_429 = True
+                        wait = min(20.0, self._settings.gemini_retry_base_delay * (2 ** attempt))
                         await asyncio.sleep(wait)
                         continue
-                    logger.error(
-                        "Gemini %s HTTP %s: %s",
-                        model,
-                        exc.response.status_code,
-                        exc.response.text[:300],
-                    )
+                    logger.error("Gemini %s HTTP %s", model, exc.response.status_code)
                     break
                 except (httpx.TimeoutException, httpx.TransportError) as exc:
-                    logger.warning("Gemini transport error on %s: %s", model, exc)
-                    await asyncio.sleep(self._settings.gemini_retry_base_delay * attempt)
+                    logger.warning("Gemini transport on %s: %s", model, exc)
+                    await asyncio.sleep(self._settings.gemini_retry_base_delay)
+
+            if hit_429:
+                logger.info("Switching model after 429 on %s", model)
+                continue
 
         if last_status == 429:
-            raise GeminiRateLimitError("Gemini rate limit (429) on all models")
+            raise GeminiRateLimitError("Gemini rate limit (429)")
         raise GeminiError(f"Gemini failed (last HTTP {last_status})")
 
     def _parse_response(self, data: dict, count: int) -> list[Slide]:

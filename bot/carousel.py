@@ -10,6 +10,7 @@ from bot.config import Settings
 from bot.http_client import http_session
 from bot.models import CarouselJob, CarouselSession, Slide
 from bot.services.gemini import GeminiRateLimitError, ScenarioGenerator
+from bot.services.scenario_fallback import generate_fallback_scenario
 from bot.services.images import ImageGenerator
 from bot.services.telegram import TelegramClient
 from bot import keyboards, texts
@@ -80,8 +81,15 @@ class CarouselOrchestrator:
                     )
                     return
                 except GeminiRateLimitError:
-                    await self._tg.edit_message(
-                        chat_id, status_message_id, texts.scenario_rate_limit()
+                    logger.warning("Gemini 429 — fallback scenario for chat %s", chat_id)
+                    slides = generate_fallback_scenario(
+                        job.topic,
+                        self._settings.slides_count,
+                        language=job.language,
+                        style=job.style,
+                    )
+                    await self._finish_scenario(
+                        job, status_message_id, slides, used_fallback=True
                     )
                     return
                 except Exception:
@@ -91,30 +99,45 @@ class CarouselOrchestrator:
                     )
                     return
 
-                session = CarouselSession(
-                    chat_id=chat_id,
-                    topic=job.topic,
-                    language=job.language,
-                    style=job.style,
-                    slides=slides,
-                    status_message_id=status_message_id,
-                    batch_size=self._settings.batch_size,
-                )
-                _sessions[chat_id] = session
-
-                end = min(session.batch_size, session.total)
-                await self._tg.edit_message(
-                    chat_id,
-                    status_message_id,
-                    texts.scenario_ready(session.total, job.topic),
-                )
-                await self._tg.send_message(
-                    chat_id,
-                    texts.draw_batch_prompt(1, end),
-                    reply_markup=keyboards.draw_batch_keyboard(1, end),
+                await self._finish_scenario(
+                    job, status_message_id, slides, used_fallback=False
                 )
         finally:
             self._jobs.release(chat_id)
+
+    async def _finish_scenario(
+        self,
+        job: CarouselJob,
+        status_message_id: int,
+        slides: list[Slide],
+        *,
+        used_fallback: bool,
+    ) -> None:
+        session = CarouselSession(
+            chat_id=job.chat_id,
+            topic=job.topic,
+            language=job.language,
+            style=job.style,
+            slides=slides,
+            status_message_id=status_message_id,
+            batch_size=self._settings.batch_size,
+        )
+        _sessions[job.chat_id] = session
+        job.slides = slides
+
+        ready_text = (
+            texts.scenario_ready_fallback(session.total, job.topic)
+            if used_fallback
+            else texts.scenario_ready(session.total, job.topic)
+        )
+        await self._tg.edit_message(job.chat_id, status_message_id, ready_text)
+
+        end = min(session.batch_size, session.total)
+        await self._tg.send_message(
+            job.chat_id,
+            texts.draw_batch_prompt(1, end),
+            reply_markup=keyboards.draw_batch_keyboard(1, end),
+        )
 
     async def draw_next_batch(self, chat_id: int) -> None:
         """Одна порция картинок (3 шт.) — отдельный запрос Vercel."""

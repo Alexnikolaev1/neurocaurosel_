@@ -104,6 +104,15 @@ def scenario_timeout() -> str:
     )
 
 
+def scenario_ready_fallback(total: int, topic: str) -> str:
+    short = topic if len(topic) <= 80 else topic[:77] + "…"
+    return (
+        f"⚡ Gemini перегружен — сценарий на <b>{total}</b> слайдов (упрощённый).\n"
+        f"Тема: <i>{short}</i>\n\n"
+        "Сюжет единый. Нажми кнопку — нарисую первую порцию."
+    )
+
+
 def scenario_ready(total: int, topic: str) -> str:
     short = topic if len(topic) <= 80 else topic[:77] + "…"
     return (
