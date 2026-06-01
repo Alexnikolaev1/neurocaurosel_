@@ -6,11 +6,10 @@ import asyncio
 import logging
 from typing import Any
 
-import httpx
-
 from bot.config import Settings
+from bot.http_client import http_session
 from bot.models import CarouselJob, Slide
-from bot.services.gemini import ScenarioGenerator
+from bot.services.gemini import GeminiRateLimitError, ScenarioGenerator
 from bot.services.images import ImageGenerator
 from bot.services.telegram import TelegramClient
 from bot import texts
@@ -61,14 +60,8 @@ class CarouselOrchestrator:
     def __init__(self, settings: Settings, tg: TelegramClient) -> None:
         self._settings = settings
         self._tg = tg
-        self._http: httpx.AsyncClient | None = None
         self._scenario_cache = ScenarioCache(settings.scenario_cache_max)
         self._jobs = JobRegistry()
-
-    async def _http_client(self) -> httpx.AsyncClient:
-        if self._http is None or self._http.is_closed:
-            self._http = httpx.AsyncClient(timeout=self._settings.request_timeout)
-        return self._http
 
     async def generate_carousel(
         self,
@@ -85,59 +78,69 @@ class CarouselOrchestrator:
             return
 
         try:
-            http = await self._http_client()
-            gemini = ScenarioGenerator(self._settings, http)
-            images_svc = ImageGenerator(self._settings, http)
+            async with http_session(self._settings) as http:
+                gemini = ScenarioGenerator(self._settings, http)
+                images_svc = ImageGenerator(self._settings, http)
 
-            # Step 1: scenario
-            await self._tg.edit_message(chat_id, status_message_id, texts.scenario_progress())
+                # Step 1: scenario
+                await self._tg.edit_message(
+                    chat_id, status_message_id, texts.scenario_progress()
+                )
 
-            try:
-                cached = self._scenario_cache.get(cache_key) if use_cache else None
-                if cached:
-                    logger.info("Scenario cache hit: %s", cache_key)
-                    slides = cached
-                else:
-                    slides = await gemini.generate(
-                        job.topic,
-                        language=job.language,
-                        style=job.style,
+                try:
+                    cached = self._scenario_cache.get(cache_key) if use_cache else None
+                    if cached:
+                        logger.info("Scenario cache hit: %s", cache_key)
+                        slides = cached
+                    else:
+                        slides = await gemini.generate(
+                            job.topic,
+                            language=job.language,
+                            style=job.style,
+                        )
+                        self._scenario_cache.set(cache_key, slides)
+                    job.slides = slides
+                except GeminiRateLimitError:
+                    logger.warning("Gemini rate limit for chat_id=%s", chat_id)
+                    await self._tg.edit_message(
+                        chat_id, status_message_id, texts.scenario_rate_limit()
                     )
-                    self._scenario_cache.set(cache_key, slides)
-                job.slides = slides
-            except Exception:
-                logger.exception("Scenario generation failed")
+                    return
+                except Exception:
+                    logger.exception("Scenario generation failed")
+                    await self._tg.edit_message(
+                        chat_id, status_message_id, texts.scenario_error()
+                    )
+                    return
+
+                # Step 2: images
+                total = len(slides)
+
+                try:
+                    images = await self._generate_all_images(
+                        slides, chat_id, status_message_id, images_svc
+                    )
+                except Exception:
+                    logger.exception("Image generation failed")
+                    await self._tg.edit_message(
+                        chat_id, status_message_id, texts.images_error()
+                    )
+                    return
+
+                # Step 3: send
                 await self._tg.edit_message(
-                    chat_id, status_message_id, texts.scenario_error()
+                    chat_id, status_message_id, texts.sending_carousel()
                 )
-                return
 
-            # Step 2: images
-            total = len(slides)
+                try:
+                    await self._send_carousel(chat_id, slides, images)
+                except Exception:
+                    logger.exception("Carousel send failed")
+                    await self._tg.send_message(chat_id, texts.send_error())
+                    return
 
-            try:
-                images = await self._generate_all_images(
-                    slides, chat_id, status_message_id, images_svc
-                )
-            except Exception:
-                logger.exception("Image generation failed")
-                await self._tg.edit_message(
-                    chat_id, status_message_id, texts.images_error()
-                )
-                return
-
-            # Step 3: send
-            await self._tg.edit_message(chat_id, status_message_id, texts.sending_carousel())
-
-            try:
-                await self._send_carousel(chat_id, slides, images)
-            except Exception:
-                logger.exception("Carousel send failed")
-                await self._tg.send_message(chat_id, texts.send_error())
-                return
-
-            self._scenario_cache.pop(cache_key)
-            await self._tg.edit_message(chat_id, status_message_id, texts.success())
+                self._scenario_cache.pop(cache_key)
+                await self._tg.edit_message(chat_id, status_message_id, texts.success())
 
         finally:
             self._jobs.release(chat_id)

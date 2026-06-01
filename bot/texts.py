@@ -97,6 +97,15 @@ def scenario_error() -> str:
     return "😔 Не удалось придумать сценарий. Попробуй переформулировать тему."
 
 
+def scenario_rate_limit() -> str:
+    return (
+        "⏳ Gemini временно перегружен (лимит запросов).\n\n"
+        "Подожди 1–2 минуты и отправь тему ещё раз — не жми несколько раз подряд.\n\n"
+        "Если повторяется: проверь ключ на <a href=\"https://aistudio.google.com/apikey\">"
+        "aistudio.google.com</a> (формат <code>AIza...</code>)."
+    )
+
+
 def images_error() -> str:
     return "😔 Ошибка при генерации изображений. Попробуй позже."
 

@@ -14,22 +14,14 @@ logger = logging.getLogger("neurocarousel.telegram")
 
 
 class TelegramClient:
+    """No persistent httpx client — safe for Vercel serverless / ASGI."""
+
     def __init__(self, settings: Settings) -> None:
         self._token = settings.telegram_token
         self._timeout = settings.request_timeout
-        self._client: httpx.AsyncClient | None = None
 
     def _url(self, method: str) -> str:
         return TELEGRAM_API.format(token=self._token, method=method)
-
-    async def _http(self) -> httpx.AsyncClient:
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(timeout=self._timeout)
-        return self._client
-
-    async def close(self) -> None:
-        if self._client and not self._client.is_closed:
-            await self._client.aclose()
 
     async def send_message(
         self,
@@ -80,8 +72,8 @@ class TelegramClient:
         for field, data in files.items():
             multipart.append((field, (f"{field}.jpg", data, "image/jpeg")))
 
-        client = await self._http()
-        r = await client.post(self._url("sendMediaGroup"), files=multipart, timeout=120)
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            r = await client.post(self._url("sendMediaGroup"), files=multipart)
         data = r.json()
         if not data.get("ok"):
             logger.error("sendMediaGroup failed: %s", data)
@@ -104,8 +96,8 @@ class TelegramClient:
         await self._post("answerCallbackQuery", json=payload)
 
     async def _post(self, method: str, **kwargs: Any) -> dict:
-        client = await self._http()
-        r = await client.post(self._url(method), **kwargs)
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            r = await client.post(self._url(method), **kwargs)
         data = r.json()
         if not data.get("ok"):
             logger.warning("Telegram %s error: %s", method, data.get("description", data))

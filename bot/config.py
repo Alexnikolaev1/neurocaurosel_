@@ -22,15 +22,27 @@ class Settings:
     image_jpeg_quality: int = 85
     scenario_cache_max: int = 200
     default_style: str = "cinematic"
+    gemini_retry_count: int = 4
+    gemini_retry_base_delay: float = 2.0
+    gemini_models: tuple[str, ...] = (
+        "gemini-2.0-flash-lite",
+        "gemini-1.5-flash",
+        "gemini-2.0-flash",
+    )
 
     @classmethod
     def from_env(cls) -> Settings:
+        models_raw = os.getenv(
+            "GEMINI_MODELS",
+            "gemini-2.0-flash-lite,gemini-1.5-flash,gemini-2.0-flash",
+        )
         return cls(
             telegram_token=_require("TELEGRAM_TOKEN"),
             gemini_key=_require("GEMINI_API_KEY"),
             hf_key=_require("HF_API_KEY"),
             slides_count=int(os.getenv("SLIDES_COUNT", "10")),
             default_style=os.getenv("DEFAULT_STYLE", "cinematic"),
+            gemini_models=tuple(m.strip() for m in models_raw.split(",") if m.strip()),
         )
 
 
@@ -43,10 +55,11 @@ def _require(name: str) -> str:
 
 TELEGRAM_API = "https://api.telegram.org/bot{token}/{method}"
 
-GEMINI_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-2.0-flash:generateContent?key={key}"
-)
+GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+
+
+def gemini_url(model: str, key: str) -> str:
+    return f"{GEMINI_API_BASE}/{model}:generateContent?key={key}"
 
 HF_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
 
