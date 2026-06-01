@@ -1,34 +1,9 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "api/bot.py",
-      "use": "@vercel/python",
-      "config": {
-        "maxLambdaSize": "50mb"
-      }
-    }
-  ],
-  "routes": [
-    {
-      "src": "/api/bot",
-      "dest": "api/bot.py",
-      "methods": ["POST", "GET"]
-    },
-    {
-      "src": "/",
-      "dest": "api/bot.py"
-    }
-  ],
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
     "api/bot.py": {
-      "maxDuration": 300,
+      "maxDuration": 60,
       "memory": 1024
     }
-  },
-  "env": {
-    "TELEGRAM_TOKEN": "@telegram_token",
-    "GEMINI_API_KEY": "@gemini_api_key",
-    "HF_API_KEY": "@hf_api_key"
   }
 }
