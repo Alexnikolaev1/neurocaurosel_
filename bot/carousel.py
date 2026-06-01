@@ -1,37 +1,24 @@
-"""Carousel generation orchestration."""
+"""Carousel: один сценарий, картинки порциями по batch_size."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from typing import Any
 
 from bot.config import Settings
 from bot.http_client import http_session
-from bot.models import CarouselJob, Slide
+from bot.models import CarouselJob, CarouselSession, Slide
 from bot.services.gemini import GeminiRateLimitError, ScenarioGenerator
 from bot.services.images import ImageGenerator
 from bot.services.telegram import TelegramClient
-from bot import texts
+from bot import keyboards, texts
 
 logger = logging.getLogger("neurocarousel.carousel")
 
-
-class ScenarioCache:
-    def __init__(self, max_size: int) -> None:
-        self._max_size = max_size
-        self._store: dict[str, list[Slide]] = {}
-
-    def get(self, key: str) -> list[Slide] | None:
-        return self._store.get(key)
-
-    def set(self, key: str, slides: list[Slide]) -> None:
-        if len(self._store) >= self._max_size:
-            oldest = next(iter(self._store))
-            del self._store[oldest]
-        self._store[key] = slides
-
-    def pop(self, key: str) -> None:
-        self._store.pop(key, None)
+# chat_id → активная сессия (общий сценарий между порциями)
+_sessions: dict[int, CarouselSession] = {}
 
 
 class JobRegistry:
@@ -55,123 +42,187 @@ class CarouselOrchestrator:
     def __init__(self, settings: Settings, tg: TelegramClient) -> None:
         self._settings = settings
         self._tg = tg
-        self._scenario_cache = ScenarioCache(settings.scenario_cache_max)
         self._jobs = JobRegistry()
 
-    async def generate_carousel(
-        self,
-        job: CarouselJob,
-        *,
-        status_message_id: int,
-        use_cache: bool = True,
-    ) -> None:
+    def is_chat_busy(self, chat_id: int) -> bool:
+        return self._jobs.is_busy(chat_id)
+
+    def has_session(self, chat_id: int) -> bool:
+        return chat_id in _sessions and _sessions[chat_id].has_more()
+
+    async def start_carousel(self, job: CarouselJob, *, status_message_id: int) -> None:
+        """Новая тема: Gemini-сценарий на все слайды, затем порции по 3."""
         chat_id = job.chat_id
         if not self._jobs.try_acquire(chat_id):
             await self._tg.send_message(chat_id, texts.job_in_progress())
             return
 
-        timeout = self._settings.function_timeout_sec
         try:
-            await asyncio.wait_for(
-                self._generate_carousel_inner(job, status_message_id, use_cache),
-                timeout=timeout,
-            )
-        except asyncio.TimeoutError:
-            logger.warning("Carousel timeout after %.0fs for chat %s", timeout, chat_id)
-            await self._tg.edit_message(
-                chat_id,
-                status_message_id,
-                texts.timeout_error(self._settings.slides_count),
-            )
-        finally:
-            self._jobs.release(chat_id)
+            async with http_session(self._settings) as http:
+                await self._tg.edit_message(
+                    chat_id, status_message_id, texts.scenario_progress()
+                )
+                gemini = ScenarioGenerator(self._settings, http)
 
-    async def _generate_carousel_inner(
-        self,
-        job: CarouselJob,
-        status_message_id: int,
-        use_cache: bool,
-    ) -> None:
-        chat_id = job.chat_id
-        cache_key = job.topic_key
-
-        async with http_session(self._settings) as http:
-            gemini = ScenarioGenerator(self._settings, http)
-            images_svc = ImageGenerator(self._settings, http)
-
-            await self._tg.edit_message(
-                chat_id, status_message_id, texts.scenario_progress()
-            )
-
-            try:
-                cached = self._scenario_cache.get(cache_key) if use_cache else None
-                if cached:
-                    slides = cached
-                else:
+                try:
                     slides = await gemini.generate(
                         job.topic,
                         language=job.language,
                         style=job.style,
                     )
-                    self._scenario_cache.set(cache_key, slides)
-                job.slides = slides
-            except GeminiRateLimitError:
-                await self._tg.edit_message(
-                    chat_id, status_message_id, texts.scenario_rate_limit()
-                )
-                return
-            except Exception:
-                logger.exception("Scenario generation failed")
-                await self._tg.edit_message(
-                    chat_id, status_message_id, texts.scenario_error()
-                )
-                return
+                except GeminiRateLimitError:
+                    await self._tg.edit_message(
+                        chat_id, status_message_id, texts.scenario_rate_limit()
+                    )
+                    return
+                except Exception:
+                    logger.exception("Scenario generation failed")
+                    await self._tg.edit_message(
+                        chat_id, status_message_id, texts.scenario_error()
+                    )
+                    return
 
-            total = len(slides)
-            sent = await self._generate_and_send_slides(
-                slides, chat_id, status_message_id, images_svc
+                session = CarouselSession(
+                    chat_id=chat_id,
+                    topic=job.topic,
+                    language=job.language,
+                    style=job.style,
+                    slides=slides,
+                    status_message_id=status_message_id,
+                    batch_size=self._settings.batch_size,
+                )
+                _sessions[chat_id] = session
+
+                images_svc = ImageGenerator(self._settings, http)
+                await self._run_batches(session, images_svc)
+        finally:
+            self._jobs.release(chat_id)
+
+    async def continue_carousel(self, chat_id: int) -> None:
+        """Продолжить ту же карусель (тот же сценарий, следующие 3 слайда)."""
+        session = _sessions.get(chat_id)
+        if not session or not session.has_more():
+            await self._tg.send_message(
+                chat_id, "Нет активной карусели. Напиши новую тему 👇"
             )
+            return
 
-            self._scenario_cache.pop(cache_key, None)
+        if not self._jobs.try_acquire(chat_id):
+            await self._tg.send_message(chat_id, texts.job_in_progress())
+            return
 
+        try:
+            async with http_session(self._settings) as http:
+                images_svc = ImageGenerator(self._settings, http)
+                await self._run_batches(session, images_svc)
+        finally:
+            self._jobs.release(chat_id)
+
+    async def _run_batches(self, session: CarouselSession, images_svc: ImageGenerator) -> None:
+        """Сколько порций успеем за лимит Vercel — без кнопки; иначе кнопка «Продолжить»."""
+        deadline = time.monotonic() + self._settings.function_timeout_sec - 5
+        batches_done = 0
+
+        while session.has_more() and time.monotonic() < deadline:
+            sent = await self._process_one_batch(session, images_svc)
             if sent == 0:
                 await self._tg.edit_message(
-                    chat_id, status_message_id, texts.no_images_generated()
+                    session.chat_id,
+                    session.status_message_id,
+                    texts.batch_images_failed(session.slide_range_label()),
                 )
-            elif sent < total:
-                await self._tg.edit_message(
-                    chat_id, status_message_id, texts.partial_success(sent, total)
-                )
-            else:
-                await self._tg.edit_message(chat_id, status_message_id, texts.success())
+                return
+            batches_done += 1
 
-    async def _generate_and_send_slides(
+        if not session.has_more():
+            _sessions.pop(session.chat_id, None)
+            await self._tg.edit_message(
+                session.chat_id,
+                session.status_message_id,
+                texts.success_batches(session.total),
+            )
+            return
+
+        # Ещё есть слайды — просим продолжить (тот же сценарий уже в session)
+        start, end = session.next_index + 1, min(
+            session.next_index + session.batch_size, session.total
+        )
+        await self._tg.edit_message(
+            session.chat_id,
+            session.status_message_id,
+            texts.batch_pause(
+                done_through=session.next_index,
+                total=session.total,
+                next_from=start,
+                next_to=end,
+            ),
+        )
+        await self._tg.send_message(
+            session.chat_id,
+            texts.batch_continue_prompt(start, end),
+            reply_markup=keyboards.continue_carousel_keyboard(),
+        )
+
+    async def _process_one_batch(
         self,
-        slides: list[Slide],
-        chat_id: int,
-        progress_msg_id: int,
+        session: CarouselSession,
         images_svc: ImageGenerator,
     ) -> int:
-        """Generate and send each slide immediately (survives partial serverless runs)."""
-        total = len(slides)
-        sent = 0
+        batch = session.batch_slides()
+        if not batch:
+            return 0
 
-        for i, slide in enumerate(slides, start=1):
-            await self._tg.edit_message(
-                chat_id, progress_msg_id, texts.image_progress(i, total)
-            )
-            await self._tg.send_chat_action(chat_id)
+        total = session.total
+        batch_num = session.current_batch_number
+        total_batches = session.total_batches
 
+        await self._tg.edit_message(
+            session.chat_id,
+            session.status_message_id,
+            texts.batch_progress(
+                batch_num=batch_num,
+                total_batches=total_batches,
+                slide_from=batch[0].number,
+                slide_to=batch[-1].number,
+                total_slides=total,
+            ),
+        )
+
+        images: list[tuple[Slide, bytes]] = []
+        for slide in batch:
+            await self._tg.send_chat_action(session.chat_id)
             img = await images_svc.generate(slide.image_prompt)
             if img:
-                caption = f"<b>Слайд {i}/{total}</b>\n\n{slide.caption}"
-                await self._tg.send_photo(chat_id, img, caption)
-                sent += 1
-
-            if i < total:
+                images.append((slide, img))
+            if slide != batch[-1]:
                 await asyncio.sleep(images_svc.between_delay)
 
-        return sent
+        if not images:
+            return 0
 
-    def is_chat_busy(self, chat_id: int) -> bool:
-        return self._jobs.is_busy(chat_id)
+        await self._send_batch_as_group(session.chat_id, images, total)
+        session.advance(len(batch))
+        return len(images)
+
+    async def _send_batch_as_group(
+        self,
+        chat_id: int,
+        items: list[tuple[Slide, bytes]],
+        total_slides: int,
+    ) -> None:
+        media: list[dict[str, Any]] = []
+        files: dict[str, bytes] = {}
+
+        for i, (slide, data) in enumerate(items):
+            field = f"b{i}"
+            files[field] = data
+            caption = f"<b>{slide.number}/{total_slides}</b>\n{slide.caption}"[:1024]
+            entry: dict[str, Any] = {
+                "type": "photo",
+                "media": f"attach://{field}",
+                "caption": caption,
+                "parse_mode": "HTML",
+            }
+            media.append(entry)
+
+        await self._tg.send_media_group(chat_id, media, files)

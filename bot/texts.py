@@ -16,7 +16,7 @@ WELCOME_TEXT = """
 • <i>Эволюция смартфонов за 20 лет</i>
 • <i>7 принципов стоицизма</i>
 
-Я придумаю сценарий, нарисую 10 уникальных картинок и пришлю готовую нейрокарусель 🎨
+Я придумаю единый сценарий на 9 слайдов и пришлю карусель порциями по 3 картинки 🎨
 """.strip()
 
 HELP_TEXT = """
@@ -149,4 +149,46 @@ def timeout_error(slides: int) -> str:
 
 
 def serverless_mode_hint() -> str:
-    return "☁️ Режим Vercel: 5 слайдов, быстрая генерация."
+    return "☁️ 9 слайдов · 3 порции по 3 картинки · один сценарий."
+
+
+def batch_progress(
+    *,
+    batch_num: int,
+    total_batches: int,
+    slide_from: int,
+    slide_to: int,
+    total_slides: int,
+) -> str:
+    return (
+        f"🖼 Порция <b>{batch_num}/{total_batches}</b> "
+        f"(слайды {slide_from}–{slide_to} из {total_slides})..."
+    )
+
+
+def batch_pause(
+    *,
+    done_through: int,
+    total: int,
+    next_from: int,
+    next_to: int,
+) -> str:
+    return (
+        f"✅ Готово слайдов 1–{done_through} из {total}.\n"
+        f"Осталось: {next_from}–{next_to} (тот же сценарий)."
+    )
+
+
+def batch_continue_prompt(slide_from: int, slide_to: int) -> str:
+    return f"Нажми кнопку — дорисую слайды <b>{slide_from}–{slide_to}</b> 👇"
+
+
+def batch_images_failed(range_label: str) -> str:
+    return f"😔 Не удалось нарисовать порцию ({range_label}). Попробуй «Продолжить» или новую тему."
+
+
+def success_batches(total: int) -> str:
+    return (
+        f"✅ Карусель из {total} слайдов готова!\n\n"
+        "Новая тема — просто напиши текст 👇"
+    )

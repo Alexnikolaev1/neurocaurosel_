@@ -51,5 +51,13 @@ def retry_keyboard() -> dict:
     }
 
 
+def continue_carousel_keyboard() -> dict:
+    return {
+        "inline_keyboard": [
+            [{"text": "▶️ Продолжить карусель", "callback_data": "carousel_next"}],
+        ]
+    }
+
+
 def style_label(style: VisualStyle) -> str:
     return _STYLE_LABELS.get(style, style.value)

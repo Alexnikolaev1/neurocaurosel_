@@ -54,3 +54,46 @@ class CarouselJob:
     @property
     def topic_key(self) -> str:
         return f"{self.chat_id}:{self.topic.strip().lower()}:{self.style.value}"
+
+
+@dataclass(slots=True)
+class CarouselSession:
+    """Единый сценарий; картинки рисуются порциями по batch_size."""
+
+    chat_id: int
+    topic: str
+    language: str
+    style: VisualStyle
+    slides: list[Slide]
+    status_message_id: int
+    next_index: int = 0
+    batch_size: int = 3
+
+    @property
+    def total(self) -> int:
+        return len(self.slides)
+
+    @property
+    def total_batches(self) -> int:
+        return (self.total + self.batch_size - 1) // self.batch_size
+
+    @property
+    def current_batch_number(self) -> int:
+        return self.next_index // self.batch_size + 1
+
+    def has_more(self) -> bool:
+        return self.next_index < self.total
+
+    def batch_slides(self) -> list[Slide]:
+        return self.slides[self.next_index : self.next_index + self.batch_size]
+
+    def advance(self, count: int) -> None:
+        self.next_index = min(self.next_index + count, self.total)
+
+    def slide_range_label(self) -> str:
+        batch = self.batch_slides()
+        if not batch:
+            return ""
+        first = batch[0].number
+        last = batch[-1].number
+        return f"{first}–{last}"

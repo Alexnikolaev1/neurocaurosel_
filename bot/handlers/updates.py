@@ -121,6 +121,11 @@ class UpdateRouter:
                 await self._tg.send_message(chat_id, "Напиши тему для новой карусели 👇")
             return
 
+        if data == "carousel_next":
+            await self._tg.answer_callback_query(query_id, "Рисую следующую порцию…")
+            await self._carousel.continue_carousel(chat_id)
+            return
+
         await self._tg.answer_callback_query(query_id)
 
     async def _handle_topic(self, chat_id: int, text: str) -> None:
@@ -158,4 +163,4 @@ class UpdateRouter:
             language=language,
             style=style,
         )
-        await self._carousel.generate_carousel(job, status_message_id=status_id)
+        await self._carousel.start_carousel(job, status_message_id=status_id)
