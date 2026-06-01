@@ -35,6 +35,10 @@ class ScenarioGenerator:
         self._http = http
 
     def _models(self) -> list[str]:
+        if self._settings.serverless_mode:
+            # На Vercel — одна быстрая модель, без перебора
+            return ["gemini-2.0-flash-lite"]
+
         seen: set[str] = set()
         result: list[str] = []
         for name in self._settings.gemini_models:
@@ -78,8 +82,8 @@ class ScenarioGenerator:
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
-                "temperature": 0.85,
-                "maxOutputTokens": 4096,
+                "temperature": 0.8,
+                "maxOutputTokens": 3072 if self._settings.serverless_mode else 4096,
                 "responseMimeType": "application/json",
             },
         }
@@ -92,7 +96,8 @@ class ScenarioGenerator:
             for attempt in range(1, self._settings.gemini_retry_count + 1):
                 logger.info("Gemini %s attempt %d for: %s", model, attempt, topic[:60])
                 try:
-                    r = await self._http.post(url, json=payload, timeout=45.0)
+                    req_timeout = 40.0 if self._settings.serverless_mode else 60.0
+                    r = await self._http.post(url, json=payload, timeout=req_timeout)
                     last_status = r.status_code
 
                     # Модель не существует — сразу следующая, без ретраев

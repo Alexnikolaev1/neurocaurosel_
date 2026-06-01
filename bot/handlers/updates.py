@@ -121,9 +121,9 @@ class UpdateRouter:
                 await self._tg.send_message(chat_id, "Напиши тему для новой карусели 👇")
             return
 
-        if data == "carousel_next":
-            await self._tg.answer_callback_query(query_id, "Рисую следующую порцию…")
-            await self._carousel.continue_carousel(chat_id)
+        if data == "carousel_draw":
+            await self._tg.answer_callback_query(query_id, "Рисую…")
+            await self._carousel.draw_next_batch(chat_id)
             return
 
         await self._tg.answer_callback_query(query_id)

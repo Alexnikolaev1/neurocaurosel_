@@ -16,7 +16,7 @@ WELCOME_TEXT = """
 • <i>Эволюция смартфонов за 20 лет</i>
 • <i>7 принципов стоицизма</i>
 
-Я придумаю единый сценарий на 9 слайдов и пришлю карусель порциями по 3 картинки 🎨
+Я придумаю сценарий на 9 слайдов, потом нарисую карусель порциями по 3 — кнопкой «Нарисовать» 🎨
 """.strip()
 
 HELP_TEXT = """
@@ -95,6 +95,26 @@ def sending_carousel() -> str:
 
 def scenario_error() -> str:
     return "😔 Не удалось придумать сценарий. Попробуй переформулировать тему."
+
+
+def scenario_timeout() -> str:
+    return (
+        "⏱ Сценарий не успел сгенерироваться за лимит сервера.\n"
+        "Попробуй тему короче или повтори через минуту."
+    )
+
+
+def scenario_ready(total: int, topic: str) -> str:
+    short = topic if len(topic) <= 80 else topic[:77] + "…"
+    return (
+        f"✅ Сценарий на <b>{total}</b> слайдов готов!\n"
+        f"Тема: <i>{short}</i>\n\n"
+        "Нажми кнопку ниже — нарисую первую порцию (3 картинки)."
+    )
+
+
+def draw_batch_prompt(slide_from: int, slide_to: int) -> str:
+    return f"Готов нарисовать слайды <b>{slide_from}–{slide_to}</b> 👇"
 
 
 def scenario_rate_limit() -> str:

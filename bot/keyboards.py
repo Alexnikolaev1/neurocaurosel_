@@ -51,10 +51,13 @@ def retry_keyboard() -> dict:
     }
 
 
-def continue_carousel_keyboard() -> dict:
+def draw_batch_keyboard(slide_from: int, slide_to: int) -> dict:
     return {
         "inline_keyboard": [
-            [{"text": "▶️ Продолжить карусель", "callback_data": "carousel_next"}],
+            [{
+                "text": f"🖼 Нарисовать слайды {slide_from}–{slide_to}",
+                "callback_data": "carousel_draw",
+            }],
         ]
     }
 

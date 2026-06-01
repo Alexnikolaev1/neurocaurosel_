@@ -1,10 +1,9 @@
-"""Carousel: один сценарий, картинки порциями по batch_size."""
+"""Carousel: сценарий отдельно, картинки — по кнопке (укладывается в 60 сек Vercel)."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from typing import Any
 
 from bot.config import Settings
@@ -17,7 +16,6 @@ from bot import keyboards, texts
 
 logger = logging.getLogger("neurocarousel.carousel")
 
-# chat_id → активная сессия (общий сценарий между порциями)
 _sessions: dict[int, CarouselSession] = {}
 
 
@@ -48,14 +46,16 @@ class CarouselOrchestrator:
         return self._jobs.is_busy(chat_id)
 
     def has_session(self, chat_id: int) -> bool:
-        return chat_id in _sessions and _sessions[chat_id].has_more()
+        return chat_id in _sessions
 
     async def start_carousel(self, job: CarouselJob, *, status_message_id: int) -> None:
-        """Новая тема: Gemini-сценарий на все слайды, затем порции по 3."""
+        """Только сценарий Gemini — без картинок (быстро, <60 сек)."""
         chat_id = job.chat_id
         if not self._jobs.try_acquire(chat_id):
             await self._tg.send_message(chat_id, texts.job_in_progress())
             return
+
+        scenario_timeout = min(self._settings.function_timeout_sec - 10, 48.0)
 
         try:
             async with http_session(self._settings) as http:
@@ -65,11 +65,20 @@ class CarouselOrchestrator:
                 gemini = ScenarioGenerator(self._settings, http)
 
                 try:
-                    slides = await gemini.generate(
-                        job.topic,
-                        language=job.language,
-                        style=job.style,
+                    slides = await asyncio.wait_for(
+                        gemini.generate(
+                            job.topic,
+                            language=job.language,
+                            style=job.style,
+                        ),
+                        timeout=scenario_timeout,
                     )
+                except asyncio.TimeoutError:
+                    logger.warning("Scenario timeout %.0fs chat=%s", scenario_timeout, chat_id)
+                    await self._tg.edit_message(
+                        chat_id, status_message_id, texts.scenario_timeout()
+                    )
+                    return
                 except GeminiRateLimitError:
                     await self._tg.edit_message(
                         chat_id, status_message_id, texts.scenario_rate_limit()
@@ -93,18 +102,31 @@ class CarouselOrchestrator:
                 )
                 _sessions[chat_id] = session
 
-                images_svc = ImageGenerator(self._settings, http)
-                await self._run_batches(session, images_svc)
+                end = min(session.batch_size, session.total)
+                await self._tg.edit_message(
+                    chat_id,
+                    status_message_id,
+                    texts.scenario_ready(session.total, job.topic),
+                )
+                await self._tg.send_message(
+                    chat_id,
+                    texts.draw_batch_prompt(1, end),
+                    reply_markup=keyboards.draw_batch_keyboard(1, end),
+                )
         finally:
             self._jobs.release(chat_id)
 
-    async def continue_carousel(self, chat_id: int) -> None:
-        """Продолжить ту же карусель (тот же сценарий, следующие 3 слайда)."""
+    async def draw_next_batch(self, chat_id: int) -> None:
+        """Одна порция картинок (3 шт.) — отдельный запрос Vercel."""
         session = _sessions.get(chat_id)
-        if not session or not session.has_more():
+        if not session:
             await self._tg.send_message(
-                chat_id, "Нет активной карусели. Напиши новую тему 👇"
+                chat_id, "Сначала отправь тему для сценария 👇"
             )
+            return
+        if not session.has_more():
+            await self._tg.send_message(chat_id, texts.success_batches(session.total))
+            _sessions.pop(chat_id, None)
             return
 
         if not self._jobs.try_acquire(chat_id):
@@ -114,25 +136,28 @@ class CarouselOrchestrator:
         try:
             async with http_session(self._settings) as http:
                 images_svc = ImageGenerator(self._settings, http)
-                await self._run_batches(session, images_svc)
+                await self._run_one_batch(session, images_svc)
         finally:
             self._jobs.release(chat_id)
 
-    async def _run_batches(self, session: CarouselSession, images_svc: ImageGenerator) -> None:
-        """Сколько порций успеем за лимит Vercel — без кнопки; иначе кнопка «Продолжить»."""
-        deadline = time.monotonic() + self._settings.function_timeout_sec - 5
-        batches_done = 0
+    async def _run_one_batch(
+        self,
+        session: CarouselSession,
+        images_svc: ImageGenerator,
+    ) -> None:
+        batch = session.batch_slides()
+        if not batch:
+            return
 
-        while session.has_more() and time.monotonic() < deadline:
-            sent = await self._process_one_batch(session, images_svc)
-            if sent == 0:
-                await self._tg.edit_message(
-                    session.chat_id,
-                    session.status_message_id,
-                    texts.batch_images_failed(session.slide_range_label()),
-                )
-                return
-            batches_done += 1
+        from_n, to_n = batch[0].number, batch[-1].number
+        sent = await self._process_one_batch(session, images_svc)
+        if sent == 0:
+            await self._tg.edit_message(
+                session.chat_id,
+                session.status_message_id,
+                texts.batch_images_failed(f"{from_n}–{to_n}"),
+            )
+            return
 
         if not session.has_more():
             _sessions.pop(session.chat_id, None)
@@ -143,24 +168,22 @@ class CarouselOrchestrator:
             )
             return
 
-        # Ещё есть слайды — просим продолжить (тот же сценарий уже в session)
-        start, end = session.next_index + 1, min(
-            session.next_index + session.batch_size, session.total
-        )
+        next_from = session.next_index + 1
+        next_to = min(session.next_index + session.batch_size, session.total)
         await self._tg.edit_message(
             session.chat_id,
             session.status_message_id,
             texts.batch_pause(
                 done_through=session.next_index,
                 total=session.total,
-                next_from=start,
-                next_to=end,
+                next_from=next_from,
+                next_to=next_to,
             ),
         )
         await self._tg.send_message(
             session.chat_id,
-            texts.batch_continue_prompt(start, end),
-            reply_markup=keyboards.continue_carousel_keyboard(),
+            texts.draw_batch_prompt(next_from, next_to),
+            reply_markup=keyboards.draw_batch_keyboard(next_from, next_to),
         )
 
     async def _process_one_batch(
@@ -217,12 +240,11 @@ class CarouselOrchestrator:
             field = f"b{i}"
             files[field] = data
             caption = f"<b>{slide.number}/{total_slides}</b>\n{slide.caption}"[:1024]
-            entry: dict[str, Any] = {
+            media.append({
                 "type": "photo",
                 "media": f"attach://{field}",
                 "caption": caption,
                 "parse_mode": "HTML",
-            }
-            media.append(entry)
+            })
 
         await self._tg.send_media_group(chat_id, media, files)
