@@ -1,5 +1,3 @@
 """NeuroCarousel bot package."""
 
-from bot.neuro_carousel import NeuroCarouselBot
-
-__all__ = ["NeuroCarouselBot"]
+__all__: list[str] = []

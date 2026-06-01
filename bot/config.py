@@ -52,10 +52,10 @@ def build_settings(
     gemini_key: str,
     hf_key: str,
 ) -> Settings:
-        models_raw = os.getenv(
-            "GEMINI_MODELS",
-            "gemini-2.0-flash,gemini-2.0-flash-lite",
-        )
+    models_raw = os.getenv(
+        "GEMINI_MODELS",
+        "gemini-2.0-flash,gemini-2.0-flash-lite",
+    )
     vercel = _is_vercel()
     serverless = os.getenv("SERVERLESS_MODE", "1" if vercel else "0") == "1"
 
