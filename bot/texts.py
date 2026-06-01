@@ -1,0 +1,124 @@
+"""User-facing copy and message templates."""
+
+from __future__ import annotations
+
+from bot.config import STYLE_PRESETS
+
+WELCOME_TEXT = """
+👋 Привет! Я <b>NeuroCarousel</b> — бот, который превращает любую идею в профессиональную карусель из 10 картинок.
+
+<b>Как использовать:</b>
+1. Выбери стиль картинок кнопками ниже (или оставь по умолчанию)
+2. Напиши тему одним сообщением
+
+<b>Примеры тем:</b>
+• <i>Утренние ритуалы успешных людей</i>
+• <i>Эволюция смартфонов за 20 лет</i>
+• <i>7 принципов стоицизма</i>
+
+Я придумаю сценарий, нарисую 10 уникальных картинок и пришлю готовую нейрокарусель 🎨
+""".strip()
+
+HELP_TEXT = """
+<b>📖 Справка NeuroCarousel</b>
+
+<b>Команды:</b>
+/start — приветствие и выбор стиля
+/help — эта справка
+/style — текущий визуальный стиль
+
+<b>Как создать карусель:</b>
+Просто отправь тему текстом. Бот сам:
+1. Сгенерирует сценарий из 10 слайдов (Gemini)
+2. Нарисует картинки (Stable Diffusion XL)
+3. Отправит медиагруппу в Telegram
+
+<b>Стили:</b>
+{styles}
+
+<b>Ограничения:</b>
+• Тема: 3–500 символов, без ссылок
+• Генерация занимает 1–3 минуты
+• Не отправляй новую тему, пока идёт генерация
+""".strip()
+
+
+def help_text() -> str:
+    styles = "\n".join(f"• <b>{name}</b> — {desc[:60]}…" for name, desc in STYLE_PRESETS.items())
+    return HELP_TEXT.format(styles=styles)
+
+
+def style_selected(style_label: str) -> str:
+    return f"✅ Стиль: <b>{style_label}</b>\n\nТеперь напиши тему для карусели 👇"
+
+
+def style_current(style_label: str) -> str:
+    return f"🎨 Текущий стиль: <b>{style_label}</b>\n\nСменить можно кнопками ниже или в /start"
+
+
+def invalid_topic_link() -> str:
+    return (
+        "🔗 Похоже, ты прислал ссылку. Напиши <b>тему</b> для карусели — "
+        "одним предложением или несколькими словами.\n\n"
+        "Например: <i>Как научиться рисовать с нуля</i>"
+    )
+
+
+def invalid_topic_length(min_len: int, max_len: int) -> str:
+    return (
+        f"✏️ Тема должна быть от {min_len} до {max_len} символов.\n"
+        "Попробуй короче или чуть подробнее."
+    )
+
+
+def job_in_progress() -> str:
+    return (
+        "⏳ У тебя уже идёт генерация карусели.\n"
+        "Подожди завершения — обычно это 1–3 минуты."
+    )
+
+
+def scenario_progress() -> str:
+    return "🎨 Генерирую сценарий..."
+
+
+def image_progress(current: int, total: int) -> str:
+    filled = "▓" * current
+    empty = "░" * (total - current)
+    pct = int(current / total * 100) if total else 0
+    return f"🖼 Рисую слайд <b>{current}/{total}</b>...\n{filled}{empty} {pct}%"
+
+
+def sending_carousel() -> str:
+    return "📤 Отправляю карусель..."
+
+
+def scenario_error() -> str:
+    return "😔 Не удалось придумать сценарий. Попробуй переформулировать тему."
+
+
+def images_error() -> str:
+    return "😔 Ошибка при генерации изображений. Попробуй позже."
+
+
+def send_error() -> str:
+    return "😔 Не удалось отправить карусель. Попробуй позже."
+
+
+def no_images_generated() -> str:
+    return (
+        "😔 Не удалось сгенерировать ни одного изображения.\n"
+        "Попробуй другую тему или повтори запрос чуть позже."
+    )
+
+
+def partial_failure(failed: list[str]) -> str:
+    items = "\n".join(f"• {c}" for c in failed)
+    return f"⚠️ Некоторые слайды не удалось нарисовать:\n{items}\n\nМожешь отправить новую тему."
+
+
+def success() -> str:
+    return (
+        "✅ Твоя нейрокарусель готова!\n\n"
+        "Хочешь ещё одну? Напиши новую тему или выбери пример 👇"
+    )
