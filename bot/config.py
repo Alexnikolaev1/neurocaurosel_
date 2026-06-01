@@ -30,9 +30,8 @@ class Settings:
     gemini_retry_count: int = 4
     gemini_retry_base_delay: float = 2.0
     gemini_models: tuple[str, ...] = (
-        "gemini-2.0-flash-lite",
-        "gemini-1.5-flash",
         "gemini-2.0-flash",
+        "gemini-2.0-flash-lite",
     )
     serverless_mode: bool = False
     pollinations_only: bool = False
@@ -53,10 +52,10 @@ def build_settings(
     gemini_key: str,
     hf_key: str,
 ) -> Settings:
-    models_raw = os.getenv(
-        "GEMINI_MODELS",
-        "gemini-2.0-flash-lite,gemini-1.5-flash,gemini-2.0-flash",
-    )
+        models_raw = os.getenv(
+            "GEMINI_MODELS",
+            "gemini-2.0-flash,gemini-2.0-flash-lite",
+        )
     vercel = _is_vercel()
     serverless = os.getenv("SERVERLESS_MODE", "1" if vercel else "0") == "1"
 

@@ -13,6 +13,13 @@ from bot.utils import extract_json_array
 
 logger = logging.getLogger("neurocarousel.gemini")
 
+# Модели, снятые с API — пропускаем даже если указаны в GEMINI_MODELS
+_DEPRECATED_MODELS = frozenset({
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
+    "gemini-pro",
+})
+
 
 class GeminiError(Exception):
     """Base Gemini API error."""
@@ -26,6 +33,18 @@ class ScenarioGenerator:
     def __init__(self, settings: Settings, http: httpx.AsyncClient) -> None:
         self._settings = settings
         self._http = http
+
+    def _models(self) -> list[str]:
+        seen: set[str] = set()
+        result: list[str] = []
+        for name in self._settings.gemini_models:
+            if name in _DEPRECATED_MODELS:
+                logger.warning("Skipping deprecated Gemini model: %s", name)
+                continue
+            if name not in seen:
+                seen.add(name)
+                result.append(name)
+        return result or ["gemini-2.0-flash", "gemini-2.0-flash-lite"]
 
     async def generate(
         self,
@@ -66,20 +85,25 @@ class ScenarioGenerator:
         }
 
         last_status: int | None = None
-        models = self._settings.gemini_models
+        models = self._models()
 
         for model in models:
             url = gemini_url(model, self._settings.gemini_key)
             for attempt in range(1, self._settings.gemini_retry_count + 1):
-                logger.info(
-                    "Gemini %s attempt %d for: %s",
-                    model,
-                    attempt,
-                    topic[:60],
-                )
+                logger.info("Gemini %s attempt %d for: %s", model, attempt, topic[:60])
                 try:
-                    r = await self._http.post(url, json=payload)
+                    r = await self._http.post(url, json=payload, timeout=45.0)
                     last_status = r.status_code
+
+                    # Модель не существует — сразу следующая, без ретраев
+                    if r.status_code in (404, 400):
+                        logger.warning(
+                            "Gemini %s HTTP %s, skip model: %s",
+                            model,
+                            r.status_code,
+                            r.text[:200],
+                        )
+                        break
 
                     if r.status_code == 429:
                         wait = self._settings.gemini_retry_base_delay * (2 ** (attempt - 1))
@@ -98,6 +122,9 @@ class ScenarioGenerator:
 
                 except httpx.HTTPStatusError as exc:
                     last_status = exc.response.status_code
+                    if exc.response.status_code in (404, 400):
+                        logger.warning("Gemini %s HTTP %s, skip", model, last_status)
+                        break
                     if exc.response.status_code == 429:
                         wait = self._settings.gemini_retry_base_delay * (2 ** (attempt - 1))
                         await asyncio.sleep(wait)
