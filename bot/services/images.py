@@ -20,17 +20,17 @@ class ImageGenerator:
         self._http = http
         self._headers = {"Authorization": f"Bearer {settings.hf_key}"}
 
-    async def generate(self, prompt: str) -> bytes | None:
+    async def generate(self, prompt: str, *, raw: bool = False) -> bytes | None:
         if self._settings.pollinations_only:
             image = await self._generate_pollinations(prompt)
-            return self._optimize(image) if image else None
+            return image if (image and raw) else (self._optimize(image) if image else None)
 
         image = await self._generate_hf(prompt)
         if image:
-            return self._optimize(image)
+            return image if raw else self._optimize(image)
         logger.warning("HF failed, trying Pollinations fallback")
         image = await self._generate_pollinations(prompt)
-        return self._optimize(image) if image else None
+        return image if (image and raw) else (self._optimize(image) if image else None)
 
     def _optimize(self, data: bytes) -> bytes:
         return compress_image(

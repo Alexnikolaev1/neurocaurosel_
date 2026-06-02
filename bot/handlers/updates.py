@@ -7,8 +7,8 @@ import logging
 from bot import keyboards, texts
 from bot.carousel import CarouselOrchestrator
 from bot.config import Settings
-from bot.keyboards import EXAMPLE_TOPICS, style_label
-from bot.models import CarouselJob, VisualStyle
+from bot.keyboards import EXAMPLE_TOPICS, style_label, text_mode_label
+from bot.models import CarouselJob, TextMode, VisualStyle
 from bot.services.telegram import TelegramClient
 from bot.utils import detect_language, is_valid_topic
 
@@ -16,6 +16,7 @@ logger = logging.getLogger("neurocarousel.handlers")
 
 # Per-chat user preferences (style) — survives warm invocations
 _user_styles: dict[int, VisualStyle] = {}
+_user_text_modes: dict[int, TextMode] = {}
 _last_topics: dict[int, str] = {}
 
 
@@ -33,6 +34,12 @@ class UpdateRouter:
 
     def _set_style(self, chat_id: int, style: VisualStyle) -> None:
         _user_styles[chat_id] = style
+
+    def _get_text_mode(self, chat_id: int) -> TextMode:
+        return _user_text_modes.get(chat_id, TextMode.CAPTION_ONLY)
+
+    def _set_text_mode(self, chat_id: int, mode: TextMode) -> None:
+        _user_text_modes[chat_id] = mode
 
     async def handle(self, update: dict) -> None:
         if callback := update.get("callback_query"):
@@ -61,6 +68,10 @@ class UpdateRouter:
             await self._cmd_style(chat_id)
             return
 
+        if text.startswith("/text"):
+            await self._cmd_text(chat_id)
+            return
+
         if text.lower() in ("далее", "рисуй", "continue", "draw", "go"):
             await self._carousel.draw_next_batch(chat_id)
             return
@@ -69,10 +80,16 @@ class UpdateRouter:
 
     async def _cmd_start(self, chat_id: int) -> None:
         style = self._get_style(chat_id)
+        text_mode = self._get_text_mode(chat_id)
         await self._tg.send_message(
             chat_id,
-            texts.WELCOME_TEXT,
+            texts.welcome_text(style_label(style), text_mode_label(text_mode)),
             reply_markup=keyboards.style_keyboard(style),
+        )
+        await self._tg.send_message(
+            chat_id,
+            texts.text_mode_current(text_mode_label(text_mode)),
+            reply_markup=keyboards.text_mode_keyboard(text_mode),
         )
         await self._tg.send_message(
             chat_id,
@@ -91,6 +108,14 @@ class UpdateRouter:
             reply_markup=keyboards.style_keyboard(style),
         )
 
+    async def _cmd_text(self, chat_id: int) -> None:
+        mode = self._get_text_mode(chat_id)
+        await self._tg.send_message(
+            chat_id,
+            texts.text_mode_current(text_mode_label(mode)),
+            reply_markup=keyboards.text_mode_keyboard(mode),
+        )
+
     async def _handle_callback(self, callback: dict) -> None:
         query_id = callback["id"]
         chat_id: int = callback["message"]["chat"]["id"]
@@ -105,6 +130,20 @@ class UpdateRouter:
                 callback["message"]["message_id"],
                 texts.style_selected(style_label(style)),
                 reply_markup=keyboards.style_keyboard(style),
+            )
+            return
+
+        if data.startswith("textmode:"):
+            mode = TextMode.from_value(data.split(":", 1)[1])
+            self._set_text_mode(chat_id, mode)
+            await self._tg.answer_callback_query(
+                query_id, f"Текст: {text_mode_label(mode)}"
+            )
+            await self._tg.edit_message(
+                chat_id,
+                callback["message"]["message_id"],
+                texts.text_mode_selected(text_mode_label(mode)),
+                reply_markup=keyboards.text_mode_keyboard(mode),
             )
             return
 
@@ -167,5 +206,6 @@ class UpdateRouter:
             topic=topic,
             language=language,
             style=style,
+            text_mode=self._get_text_mode(chat_id),
         )
         await self._carousel.start_carousel(job, status_message_id=status_id)

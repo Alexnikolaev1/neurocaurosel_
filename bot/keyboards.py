@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from bot.config import STYLE_PRESETS
-from bot.models import VisualStyle
+from bot.models import TextMode, VisualStyle
 
 EXAMPLE_TOPICS = [
     "Утренние ритуалы успешных людей",
@@ -19,6 +19,26 @@ _STYLE_LABELS = {
     VisualStyle.RETRO: "📼 Ретро",
     VisualStyle.PHOTO: "📷 Фото",
 }
+
+
+_TEXT_MODE_LABELS = {
+    TextMode.CAPTION_ONLY: "💬 Текст в подписи",
+    TextMode.TEXT_ON_IMAGE: "🖼 Текст на слайде",
+}
+
+
+def text_mode_keyboard(current: TextMode | None = None) -> dict:
+    rows = []
+    for mode in TextMode:
+        label = _TEXT_MODE_LABELS[mode]
+        if mode == current:
+            label = f"• {label} •"
+        rows.append([{"text": label, "callback_data": f"textmode:{mode.value}"}])
+    return {"inline_keyboard": rows}
+
+
+def text_mode_label(mode: TextMode) -> str:
+    return _TEXT_MODE_LABELS.get(mode, mode.value)
 
 
 def style_keyboard(current: VisualStyle | None = None) -> dict:

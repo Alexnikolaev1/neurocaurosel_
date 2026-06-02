@@ -6,6 +6,20 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 
+class TextMode(str, Enum):
+    """Как показывать текст слайда."""
+
+    CAPTION_ONLY = "caption"  # только подпись Telegram под фото
+    TEXT_ON_IMAGE = "overlay"  # текст на картинке (Pillow) + короткая подпись
+
+    @classmethod
+    def from_value(cls, value: str | None) -> TextMode:
+        try:
+            return cls(value or cls.CAPTION_ONLY)
+        except ValueError:
+            return cls.CAPTION_ONLY
+
+
 class VisualStyle(str, Enum):
     CINEMATIC = "cinematic"
     MINIMAL = "minimal"
@@ -49,6 +63,7 @@ class CarouselJob:
     topic: str
     language: str
     style: VisualStyle = VisualStyle.CINEMATIC
+    text_mode: TextMode = TextMode.CAPTION_ONLY
     slides: list[Slide] = field(default_factory=list)
 
     @property
@@ -68,6 +83,7 @@ class CarouselSession:
     status_message_id: int
     next_index: int = 0
     batch_size: int = 2
+    text_mode: TextMode = TextMode.CAPTION_ONLY
 
     @property
     def total(self) -> int:

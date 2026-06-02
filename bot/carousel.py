@@ -8,7 +8,8 @@ from typing import Any
 
 from bot.config import Settings
 from bot.http_client import http_session
-from bot.models import CarouselJob, CarouselSession, Slide
+from bot.image_overlay import prepare_slide_image
+from bot.models import CarouselJob, CarouselSession, Slide, TextMode
 from bot.services.gemini import GeminiRateLimitError, ScenarioGenerator
 from bot.services.scenario_fallback import generate_fallback_scenario
 from bot.services.images import ImageGenerator
@@ -116,6 +117,7 @@ class CarouselOrchestrator:
             topic=job.topic,
             language=job.language,
             style=job.style,
+            text_mode=job.text_mode,
             slides=slides,
             status_message_id=status_message_id,
             batch_size=self._settings.batch_size,
@@ -244,18 +246,33 @@ class CarouselOrchestrator:
         )
 
         images: list[tuple[Slide, bytes]] = []
+        overlay = session.text_mode == TextMode.TEXT_ON_IMAGE
         for slide in batch:
             await self._tg.send_chat_action(session.chat_id)
-            img = await images_svc.generate(slide.image_prompt)
-            if img:
-                images.append((slide, img))
+            raw = await images_svc.generate(slide.image_prompt, raw=overlay)
+            if raw:
+                data = (
+                    prepare_slide_image(
+                        raw,
+                        slide.caption,
+                        slide_number=slide.number,
+                        total_slides=total,
+                        text_mode=session.text_mode,
+                        settings=self._settings,
+                    )
+                    if overlay
+                    else raw
+                )
+                images.append((slide, data))
             if slide != batch[-1]:
                 await asyncio.sleep(images_svc.between_delay)
 
         if not images:
             return 0
 
-        await self._send_batch_as_group(session.chat_id, images, total)
+        await self._send_batch_as_group(
+            session.chat_id, images, total, session.text_mode
+        )
         session.advance(len(batch))
         return len(images)
 
@@ -264,6 +281,7 @@ class CarouselOrchestrator:
         chat_id: int,
         items: list[tuple[Slide, bytes]],
         total_slides: int,
+        text_mode: TextMode,
     ) -> None:
         media: list[dict[str, Any]] = []
         files: dict[str, bytes] = {}
@@ -271,7 +289,10 @@ class CarouselOrchestrator:
         for i, (slide, data) in enumerate(items):
             field = f"b{i}"
             files[field] = data
-            caption = f"<b>{slide.number}/{total_slides}</b>\n{slide.caption}"[:1024]
+            if text_mode == TextMode.TEXT_ON_IMAGE:
+                caption = f"<b>{slide.number}/{total_slides}</b> · текст на картинке"[:1024]
+            else:
+                caption = f"<b>{slide.number}/{total_slides}</b>\n{slide.caption}"[:1024]
             media.append({
                 "type": "photo",
                 "media": f"attach://{field}",

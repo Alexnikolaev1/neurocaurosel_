@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 
-from bot.models import CarouselSession, Slide, VisualStyle
+from bot.models import CarouselSession, Slide, TextMode, VisualStyle
 
 logger = logging.getLogger("neurocarousel.session_store")
 
@@ -35,6 +35,7 @@ def serialize_session(session: CarouselSession) -> str:
             "status_message_id": session.status_message_id,
             "next_index": session.next_index,
             "batch_size": session.batch_size,
+            "text_mode": session.text_mode.value,
             "slides": [s.to_dict() for s in session.slides],
         },
         ensure_ascii=False,
@@ -54,6 +55,7 @@ def deserialize_session(raw: str) -> CarouselSession | None:
             status_message_id=int(data["status_message_id"]),
             next_index=int(data.get("next_index", 0)),
             batch_size=int(data.get("batch_size", 2)),
+            text_mode=TextMode.from_value(data.get("text_mode")),
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError):
         logger.exception("Bad session JSON")
