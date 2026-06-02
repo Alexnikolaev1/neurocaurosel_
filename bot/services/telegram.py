@@ -123,5 +123,9 @@ class TelegramClient:
             r = await client.post(self._url(method), **kwargs)
         data = r.json()
         if not data.get("ok"):
-            logger.warning("Telegram %s error: %s", method, data.get("description", data))
+            desc = str(data.get("description", data))
+            if "query is too old" in desc or "query ID is invalid" in desc:
+                logger.debug("Telegram %s: %s", method, desc)
+            else:
+                logger.warning("Telegram %s error: %s", method, desc)
         return data

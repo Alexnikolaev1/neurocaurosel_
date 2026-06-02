@@ -61,6 +61,10 @@ class UpdateRouter:
             await self._cmd_style(chat_id)
             return
 
+        if text.lower() in ("далее", "рисуй", "continue", "draw", "go"):
+            await self._carousel.draw_next_batch(chat_id)
+            return
+
         await self._handle_topic(chat_id, text)
 
     async def _cmd_start(self, chat_id: int) -> None:
@@ -122,7 +126,8 @@ class UpdateRouter:
             return
 
         if data == "carousel_draw":
-            await self._tg.answer_callback_query(query_id, "Рисую…")
+            # Сразу отвечаем Telegram (<30 сек), иначе «query is too old»
+            await self._tg.answer_callback_query(query_id, "Рисую порцию…")
             await self._carousel.draw_next_batch(chat_id)
             return
 

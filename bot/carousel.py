@@ -1,4 +1,4 @@
-"""Carousel: сценарий отдельно, картинки — по кнопке (укладывается в 60 сек Vercel)."""
+"""Carousel: сценарий отдельно, картинки порциями; сессия в Redis/памяти."""
 
 from __future__ import annotations
 
@@ -13,11 +13,10 @@ from bot.services.gemini import GeminiRateLimitError, ScenarioGenerator
 from bot.services.scenario_fallback import generate_fallback_scenario
 from bot.services.images import ImageGenerator
 from bot.services.telegram import TelegramClient
+from bot.session_store import delete_session, load_session, save_session, storage_mode
 from bot import keyboards, texts
 
 logger = logging.getLogger("neurocarousel.carousel")
-
-_sessions: dict[int, CarouselSession] = {}
 
 
 class JobRegistry:
@@ -46,11 +45,11 @@ class CarouselOrchestrator:
     def is_chat_busy(self, chat_id: int) -> bool:
         return self._jobs.is_busy(chat_id)
 
-    def has_session(self, chat_id: int) -> bool:
-        return chat_id in _sessions
+    async def has_session(self, chat_id: int) -> bool:
+        session = await load_session(chat_id)
+        return session is not None and session.has_more()
 
     async def start_carousel(self, job: CarouselJob, *, status_message_id: int) -> None:
-        """Только сценарий Gemini — без картинок (быстро, <60 сек)."""
         chat_id = job.chat_id
         if not self._jobs.try_acquire(chat_id):
             await self._tg.send_message(chat_id, texts.job_in_progress())
@@ -75,13 +74,12 @@ class CarouselOrchestrator:
                         timeout=scenario_timeout,
                     )
                 except asyncio.TimeoutError:
-                    logger.warning("Scenario timeout %.0fs chat=%s", scenario_timeout, chat_id)
                     await self._tg.edit_message(
                         chat_id, status_message_id, texts.scenario_timeout()
                     )
                     return
                 except GeminiRateLimitError:
-                    logger.warning("Gemini 429 — fallback scenario for chat %s", chat_id)
+                    logger.warning("Gemini 429 — fallback scenario chat=%s", chat_id)
                     slides = generate_fallback_scenario(
                         job.topic,
                         self._settings.slides_count,
@@ -122,8 +120,8 @@ class CarouselOrchestrator:
             status_message_id=status_message_id,
             batch_size=self._settings.batch_size,
         )
-        _sessions[job.chat_id] = session
-        job.slides = slides
+        await save_session(session)
+        logger.info("Session saved (%s) chat=%s slides=%d", storage_mode(), job.chat_id, len(slides))
 
         ready_text = (
             texts.scenario_ready_fallback(session.total, job.topic)
@@ -133,33 +131,44 @@ class CarouselOrchestrator:
         await self._tg.edit_message(job.chat_id, status_message_id, ready_text)
 
         end = min(session.batch_size, session.total)
+        hint = texts.draw_hint_continue_text()
         await self._tg.send_message(
             job.chat_id,
-            texts.draw_batch_prompt(1, end),
+            f"{texts.draw_batch_prompt(1, end)}\n\n{hint}",
             reply_markup=keyboards.draw_batch_keyboard(1, end),
         )
 
     async def draw_next_batch(self, chat_id: int) -> None:
-        """Одна порция картинок (3 шт.) — отдельный запрос Vercel."""
-        session = _sessions.get(chat_id)
+        session = await load_session(chat_id)
         if not session:
-            await self._tg.send_message(
-                chat_id, "Сначала отправь тему для сценария 👇"
-            )
+            await self._tg.send_message(chat_id, texts.session_not_found())
             return
         if not session.has_more():
             await self._tg.send_message(chat_id, texts.success_batches(session.total))
-            _sessions.pop(chat_id, None)
+            await delete_session(chat_id)
             return
 
         if not self._jobs.try_acquire(chat_id):
             await self._tg.send_message(chat_id, texts.job_in_progress())
             return
 
+        draw_timeout = self._settings.function_timeout_sec - 5
+
         try:
             async with http_session(self._settings) as http:
                 images_svc = ImageGenerator(self._settings, http)
-                await self._run_one_batch(session, images_svc)
+                try:
+                    await asyncio.wait_for(
+                        self._run_one_batch(session, images_svc),
+                        timeout=draw_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("Draw batch timeout chat=%s", chat_id)
+                    await save_session(session)
+                    await self._tg.send_message(
+                        chat_id,
+                        texts.draw_timeout_continue(session.next_index, session.total),
+                    )
         finally:
             self._jobs.release(chat_id)
 
@@ -174,6 +183,8 @@ class CarouselOrchestrator:
 
         from_n, to_n = batch[0].number, batch[-1].number
         sent = await self._process_one_batch(session, images_svc)
+        await save_session(session)
+
         if sent == 0:
             await self._tg.edit_message(
                 session.chat_id,
@@ -183,7 +194,7 @@ class CarouselOrchestrator:
             return
 
         if not session.has_more():
-            _sessions.pop(session.chat_id, None)
+            await delete_session(session.chat_id)
             await self._tg.edit_message(
                 session.chat_id,
                 session.status_message_id,
@@ -205,7 +216,7 @@ class CarouselOrchestrator:
         )
         await self._tg.send_message(
             session.chat_id,
-            texts.draw_batch_prompt(next_from, next_to),
+            f"{texts.draw_batch_prompt(next_from, next_to)}\n\n{texts.draw_hint_continue_text()}",
             reply_markup=keyboards.draw_batch_keyboard(next_from, next_to),
         )
 
@@ -219,15 +230,12 @@ class CarouselOrchestrator:
             return 0
 
         total = session.total
-        batch_num = session.current_batch_number
-        total_batches = session.total_batches
-
         await self._tg.edit_message(
             session.chat_id,
             session.status_message_id,
             texts.batch_progress(
-                batch_num=batch_num,
-                total_batches=total_batches,
+                batch_num=session.current_batch_number,
+                total_batches=session.total_batches,
                 slide_from=batch[0].number,
                 slide_to=batch[-1].number,
                 total_slides=total,

@@ -126,6 +126,24 @@ def draw_batch_prompt(slide_from: int, slide_to: int) -> str:
     return f"Готов нарисовать слайды <b>{slide_from}–{slide_to}</b> 👇"
 
 
+def draw_hint_continue_text() -> str:
+    return "Или напиши: <b>далее</b>"
+
+
+def session_not_found() -> str:
+    return (
+        "❌ Сессия карусели не найдена (сервер перезапустился).\n"
+        "Отправь <b>новую тему</b> — сценарий создастся заново."
+    )
+
+
+def draw_timeout_continue(done: int, total: int) -> str:
+    return (
+        f"⏱ Лимит времени сервера. Готово <b>{done}/{total}</b> слайдов.\n"
+        "Нажми кнопку ещё раз или напиши <b>далее</b> — продолжу тот же сценарий."
+    )
+
+
 def scenario_rate_limit() -> str:
     return (
         "⏳ Gemini временно перегружен (лимит запросов).\n\n"
