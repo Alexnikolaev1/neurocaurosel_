@@ -16,7 +16,7 @@ WELCOME_TEXT = """
 • <i>Эволюция смартфонов за 20 лет</i>
 • <i>7 принципов стоицизма</i>
 
-Я придумаю сценарий на 9 слайдов, потом нарисую карусель порциями по 3 — кнопкой «Нарисовать» 🎨
+Я придумаю сценарий на 8 слайдов и нарисую карусель 4 порциями по 2 картинки 🎨
 """.strip()
 
 HELP_TEXT = """
@@ -29,7 +29,7 @@ HELP_TEXT = """
 
 <b>Как создать карусель:</b>
 Просто отправь тему текстом. Бот сам:
-1. Сгенерирует сценарий из 10 слайдов (Gemini)
+1. Сгенерирует сценарий из 8 слайдов (Gemini)
 2. Нарисует картинки (Stable Diffusion XL)
 3. Отправит медиагруппу в Telegram
 
@@ -104,21 +104,27 @@ def scenario_timeout() -> str:
     )
 
 
-def scenario_ready_fallback(total: int, topic: str) -> str:
+def _batch_info(total: int, batch_size: int) -> str:
+    batches = (total + batch_size - 1) // batch_size
+    return f"{batches} порции по {batch_size}"
+
+
+def scenario_ready_fallback(total: int, topic: str, batch_size: int = 2) -> str:
     short = topic if len(topic) <= 80 else topic[:77] + "…"
     return (
         f"⚡ Gemini перегружен — сценарий на <b>{total}</b> слайдов (упрощённый).\n"
         f"Тема: <i>{short}</i>\n\n"
-        "Сюжет единый. Нажми кнопку — нарисую первую порцию."
+        f"Сюжет единый · {_batch_info(total, batch_size)}. Нажми кнопку ниже."
     )
 
 
-def scenario_ready(total: int, topic: str) -> str:
+def scenario_ready(total: int, topic: str, batch_size: int = 2) -> str:
     short = topic if len(topic) <= 80 else topic[:77] + "…"
     return (
         f"✅ Сценарий на <b>{total}</b> слайдов готов!\n"
         f"Тема: <i>{short}</i>\n\n"
-        "Нажми кнопку ниже — нарисую первую порцию (3 картинки)."
+        f"Нажми кнопку — нарисую слайды 1–{min(batch_size, total)} "
+        f"({_batch_info(total, batch_size)})."
     )
 
 
@@ -196,7 +202,7 @@ def timeout_error(slides: int) -> str:
 
 
 def serverless_mode_hint() -> str:
-    return "☁️ 9 слайдов · 3 порции по 3 картинки · один сценарий."
+    return "☁️ 8 слайдов · 4 порции по 2 картинки · один сценарий."
 
 
 def batch_progress(

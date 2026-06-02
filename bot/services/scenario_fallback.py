@@ -50,7 +50,7 @@ def generate_fallback_scenario(
     language: str,
     style: VisualStyle,
 ) -> list[Slide]:
-    """Единый сюжет из шаблонов — 9 связанных слайдов на одну тему."""
+    """Единый сюжет из шаблонов — связанные слайды на одну тему."""
     style_hint = STYLE_PRESETS[style.value]
     captions_tpl = _RU_CAPTIONS if language == "ru" else _EN_CAPTIONS
     topic_short = topic.strip()[:120]

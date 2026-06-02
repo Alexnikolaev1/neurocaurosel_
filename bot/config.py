@@ -15,8 +15,8 @@ class Settings:
     telegram_token: str
     gemini_key: str
     hf_key: str
-    slides_count: int = 9
-    batch_size: int = 3
+    slides_count: int = 8
+    batch_size: int = 2
     topic_min_len: int = 3
     topic_max_len: int = 500
     hf_retry_count: int = 3
@@ -59,9 +59,10 @@ def build_settings(
     vercel = _is_vercel()
     serverless = os.getenv("SERVERLESS_MODE", "1" if vercel else "0") == "1"
 
-    default_slides = "9" if serverless else "10"
+    default_slides = "8" if serverless else "10"
+    default_batch = "2" if serverless else "3"
     slides = int(os.getenv("SLIDES_COUNT", default_slides))
-    batch_size = int(os.getenv("BATCH_SIZE", "3"))
+    batch_size = int(os.getenv("BATCH_SIZE", default_batch))
 
     pollinations_only = os.getenv("POLLINATIONS_ONLY", "1" if serverless else "0") == "1"
     between_delay = float(os.getenv("HF_BETWEEN_DELAY", "0.5" if serverless else "2.5"))

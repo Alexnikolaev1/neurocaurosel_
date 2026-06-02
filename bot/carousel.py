@@ -123,10 +123,11 @@ class CarouselOrchestrator:
         await save_session(session)
         logger.info("Session saved (%s) chat=%s slides=%d", storage_mode(), job.chat_id, len(slides))
 
+        bs = session.batch_size
         ready_text = (
-            texts.scenario_ready_fallback(session.total, job.topic)
+            texts.scenario_ready_fallback(session.total, job.topic, bs)
             if used_fallback
-            else texts.scenario_ready(session.total, job.topic)
+            else texts.scenario_ready(session.total, job.topic, bs)
         )
         await self._tg.edit_message(job.chat_id, status_message_id, ready_text)
 

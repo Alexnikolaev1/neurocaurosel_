@@ -53,7 +53,7 @@ def deserialize_session(raw: str) -> CarouselSession | None:
             slides=slides,
             status_message_id=int(data["status_message_id"]),
             next_index=int(data.get("next_index", 0)),
-            batch_size=int(data.get("batch_size", 3)),
+            batch_size=int(data.get("batch_size", 2)),
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError):
         logger.exception("Bad session JSON")

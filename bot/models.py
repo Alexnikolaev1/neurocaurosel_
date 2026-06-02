@@ -67,7 +67,7 @@ class CarouselSession:
     slides: list[Slide]
     status_message_id: int
     next_index: int = 0
-    batch_size: int = 3
+    batch_size: int = 2
 
     @property
     def total(self) -> int:
