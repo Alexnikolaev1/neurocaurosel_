@@ -6,7 +6,7 @@ import json
 import os
 from dataclasses import dataclass
 
-BUILD_TAG = "v8-gemini-default"
+BUILD_TAG = "v9-redraw-slide"
 
 
 def pollinations_key_from_env() -> str:

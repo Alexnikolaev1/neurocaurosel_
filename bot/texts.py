@@ -175,6 +175,33 @@ def draw_hint_continue_text() -> str:
     return "Или напиши: <b>далее</b>"
 
 
+def redraw_progress(slide_number: int) -> str:
+    return f"🔄 Перерисовываю слайд <b>{slide_number}</b>…"
+
+
+def redraw_ok(slide_number: int) -> str:
+    return f"✅ Слайд <b>{slide_number}</b> перерисован и отправлен выше."
+
+
+def redraw_failed(slide_number: int, trace: str = "") -> str:
+    from bot.utils import escape_html
+
+    extra = ""
+    if trace:
+        extra = f"\n\n<code>{escape_html(trace[:400])}</code>"
+    return (
+        f"😔 Слайд <b>{slide_number}</b>: снова не удалось получить картинку.{extra}\n"
+        "Нажми <b>перерисовать</b> ещё раз или продолжай дальше."
+    )
+
+
+def redraw_not_available(slide_number: int) -> str:
+    return (
+        f"❌ Слайд <b>{slide_number}</b> ещё не рисовали или сессия устарела.\n"
+        "Продолжи кнопкой «Нарисовать» или отправь новую тему."
+    )
+
+
 def session_not_found() -> str:
     return (
         "❌ Сессия карусели не найдена (сервер перезапустился).\n"
@@ -287,10 +314,9 @@ def batch_continue_prompt(slide_from: int, slide_to: int) -> str:
 def placeholder_hint() -> str:
     return (
         "⚠️ Это <b>заглушка</b> (API картинок не отвечает).\n"
-        "Открой в браузере: <code>https://neurocaurosel.vercel.app/api/bot</code> — "
-        "должно быть <code>\"build\": \"v8-gemini-default\"</code> и "
-        "<code>\"pollinations_key_loaded\": true</code>.\n"
-        "Иначе добавь <b>POLLINATIONS_API_KEY</b> в Vercel и сделай <b>Redeploy</b>."
+        "Нажми <b>🔄 Перерисовать слайд</b> ниже — попробую снова без заглушки.\n\n"
+        "Если не помогает: <code>https://neurocaurosel.vercel.app/api/bot</code> — "
+        "<code>pollinations_key_loaded: true</code>."
     )
 
 

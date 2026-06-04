@@ -220,6 +220,116 @@ class CarouselOrchestrator:
         finally:
             self._jobs.release(chat_id)
 
+    async def redraw_slide(self, chat_id: int, slide_number: int) -> None:
+        session = await load_session(chat_id)
+        if not session:
+            await self._tg.send_message(chat_id, texts.session_not_found())
+            return
+        if session.next_index <= 0:
+            await self._tg.send_message(chat_id, texts.redraw_not_available(slide_number))
+            return
+
+        slide = next((s for s in session.slides if s.number == slide_number), None)
+        if not slide:
+            await self._tg.send_message(chat_id, texts.redraw_not_available(slide_number))
+            return
+
+        last_done = session.slides[session.next_index - 1].number
+        if slide_number > last_done:
+            await self._tg.send_message(chat_id, texts.redraw_not_available(slide_number))
+            return
+
+        if not self._jobs.try_acquire(chat_id):
+            await self._tg.send_message(chat_id, texts.job_in_progress())
+            return
+
+        draw_timeout = self._settings.function_timeout_sec - 3
+        logger.info("Redraw slide=%d chat=%s [%s]", slide_number, chat_id, BUILD_TAG)
+
+        try:
+            images_svc = ImageGenerator(self._settings)
+            await self._tg.send_message(chat_id, texts.redraw_progress(slide_number))
+            await asyncio.wait_for(
+                self._run_redraw(session, slide, images_svc),
+                timeout=draw_timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Redraw timeout slide=%d chat=%s", slide_number, chat_id)
+            if session.has_more():
+                next_from = session.next_index + 1
+                next_to = min(session.next_index + session.batch_size, session.total)
+                markup = keyboards.draw_actions_keyboard(
+                    next_from,
+                    next_to,
+                    redraw_slide=slide_number,
+                )
+            else:
+                markup = keyboards.redraw_only_keyboard(slide_number)
+            await self._tg.send_message(
+                chat_id,
+                texts.draw_timeout_continue(session.next_index, session.total),
+                reply_markup=markup,
+            )
+        except Exception:
+            logger.exception("Redraw failed slide=%d chat=%s", slide_number, chat_id)
+            await self._tg.send_message(
+                chat_id,
+                texts.redraw_failed(slide_number),
+                reply_markup=keyboards.draw_actions_keyboard(
+                    slide_number,
+                    slide_number,
+                    redraw_slide=slide_number,
+                ),
+            )
+        finally:
+            self._jobs.release(chat_id)
+
+    async def _run_redraw(
+        self,
+        session: CarouselSession,
+        slide: Slide,
+        images_svc: ImageGenerator,
+    ) -> None:
+        item = await self._build_slide_image(
+            session,
+            slide,
+            images_svc,
+            allow_placeholder=False,
+        )
+        if not item:
+            await self._tg.send_message(
+                session.chat_id,
+                texts.redraw_failed(slide.number, images_svc.last_trace),
+                reply_markup=keyboards.draw_actions_keyboard(
+                    slide.number,
+                    slide.number,
+                    redraw_slide=slide.number,
+                ),
+            )
+            return
+
+        slide_obj, data, _placeholder = item
+        ok = await self._send_slides(
+            session.chat_id,
+            [(slide_obj, data, False)],
+            session.total,
+            session.text_mode,
+        )
+        if not ok:
+            await self._tg.send_message(session.chat_id, texts.send_error())
+            return
+
+        await self._tg.send_message(session.chat_id, texts.redraw_ok(slide.number))
+
+        if session.has_more():
+            next_from = session.next_index + 1
+            next_to = min(session.next_index + session.batch_size, session.total)
+            await self._tg.send_message(
+                session.chat_id,
+                f"{texts.draw_batch_prompt(next_from, next_to)}\n\n{texts.draw_hint_continue_text()}",
+                reply_markup=keyboards.draw_actions_keyboard(next_from, next_to),
+            )
+
     async def _run_one_batch(
         self,
         session: CarouselSession,
@@ -230,8 +340,9 @@ class CarouselOrchestrator:
             return
 
         from_n, to_n = batch[0].number, batch[-1].number
-        sent = await self._process_one_batch(session, images_svc)
+        sent, placeholder_nums = await self._process_one_batch(session, images_svc)
         await save_session(session)
+        redraw_slide = placeholder_nums[-1] if placeholder_nums else None
 
         if sent == 0:
             label = str(from_n) if from_n == to_n else f"{from_n}–{to_n}"
@@ -248,7 +359,7 @@ class CarouselOrchestrator:
             await self._tg.send_message(
                 session.chat_id,
                 fail_text,
-                reply_markup=keyboards.draw_batch_keyboard(from_n, to_n),
+                reply_markup=keyboards.draw_actions_keyboard(from_n, to_n),
             )
             return
 
@@ -276,17 +387,21 @@ class CarouselOrchestrator:
         await self._tg.send_message(
             session.chat_id,
             f"{texts.draw_batch_prompt(next_from, next_to)}\n\n{texts.draw_hint_continue_text()}",
-            reply_markup=keyboards.draw_batch_keyboard(next_from, next_to),
+            reply_markup=keyboards.draw_actions_keyboard(
+                next_from,
+                next_to,
+                redraw_slide=redraw_slide,
+            ),
         )
 
     async def _process_one_batch(
         self,
         session: CarouselSession,
         images_svc: ImageGenerator,
-    ) -> int:
+    ) -> tuple[int, list[int]]:
         batch = session.batch_slides()
         if not batch:
-            return 0
+            return 0, []
 
         total = session.total
         await self._tg.edit_message(
@@ -302,62 +417,83 @@ class CarouselOrchestrator:
         )
 
         images: list[tuple[Slide, bytes, bool]] = []
-        overlay = session.text_mode == TextMode.TEXT_ON_IMAGE
+        placeholder_nums: list[int] = []
         for slide in batch:
             await self._tg.send_chat_action(session.chat_id)
-            raw = await images_svc.generate(slide.image_prompt, raw=overlay)
-            used_placeholder = False
-            if not raw and self._settings.placeholder_on_fail:
-                logger.warning(
-                    "Placeholder slide=%d trace=%s",
-                    slide.number,
-                    images_svc.last_trace,
-                )
-                raw = render_placeholder_slide(
-                    slide.caption,
-                    slide_number=slide.number,
-                    total_slides=total,
-                    topic=session.topic,
-                )
-                used_placeholder = True
-            elif not raw:
-                logger.error(
-                    "Image gen failed slide=%d chat=%s trace=%s",
-                    slide.number,
-                    session.chat_id,
-                    images_svc.last_trace,
-                )
-            if raw:
-                if used_placeholder or not overlay:
-                    data = raw
-                else:
-                    data = prepare_slide_image(
-                        raw,
-                        slide.caption,
-                        slide_number=slide.number,
-                        total_slides=total,
-                        text_mode=session.text_mode,
-                        settings=self._settings,
-                    )
-                images.append((slide, data, used_placeholder))
+            item = await self._build_slide_image(
+                session,
+                slide,
+                images_svc,
+                allow_placeholder=True,
+            )
+            if item:
+                images.append(item)
+                if item[2]:
+                    placeholder_nums.append(slide.number)
             if slide != batch[-1]:
                 await asyncio.sleep(images_svc.between_delay)
 
         if not images:
-            return 0
+            return 0, []
 
         ok = await self._send_slides(session.chat_id, images, total, session.text_mode)
-        if ok and any(p for _, _, p in images):
+        if ok and placeholder_nums:
             await self._tg.send_message(
                 session.chat_id,
                 texts.placeholder_hint(),
             )
         if not ok:
             logger.error("Telegram send failed chat=%s slides=%s", session.chat_id, batch[0].number)
-            return 0
+            return 0, []
 
         session.advance(len(batch))
-        return len(images)
+        return len(images), placeholder_nums
+
+    async def _build_slide_image(
+        self,
+        session: CarouselSession,
+        slide: Slide,
+        images_svc: ImageGenerator,
+        *,
+        allow_placeholder: bool,
+    ) -> tuple[Slide, bytes, bool] | None:
+        overlay = session.text_mode == TextMode.TEXT_ON_IMAGE
+        raw = await images_svc.generate(slide.image_prompt, raw=overlay)
+        used_placeholder = False
+        if not raw and allow_placeholder and self._settings.placeholder_on_fail:
+            logger.warning(
+                "Placeholder slide=%d trace=%s",
+                slide.number,
+                images_svc.last_trace,
+            )
+            raw = render_placeholder_slide(
+                slide.caption,
+                slide_number=slide.number,
+                total_slides=session.total,
+                topic=session.topic,
+            )
+            used_placeholder = True
+        elif not raw:
+            logger.error(
+                "Image gen failed slide=%d chat=%s trace=%s",
+                slide.number,
+                session.chat_id,
+                images_svc.last_trace,
+            )
+            return None
+
+        if used_placeholder or not overlay:
+            data = raw
+        else:
+            data = prepare_slide_image(
+                raw,
+                slide.caption,
+                slide_number=slide.number,
+                total_slides=session.total,
+                text_mode=session.text_mode,
+                settings=self._settings,
+            )
+        return slide, data, used_placeholder
 
     def _slide_caption(
         self,

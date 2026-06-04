@@ -170,6 +170,16 @@ class UpdateRouter:
             await self._carousel.draw_next_batch(chat_id)
             return
 
+        if data.startswith("carousel_redraw:"):
+            try:
+                slide_number = int(data.split(":", 1)[1])
+            except ValueError:
+                await self._tg.answer_callback_query(query_id)
+                return
+            await self._tg.answer_callback_query(query_id, f"Перерисовка {slide_number}…")
+            await self._carousel.redraw_slide(chat_id, slide_number)
+            return
+
         await self._tg.answer_callback_query(query_id)
 
     async def _handle_topic(self, chat_id: int, text: str) -> None:
