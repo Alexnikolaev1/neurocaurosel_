@@ -43,8 +43,9 @@ class Slide:
 
     @classmethod
     def from_dict(cls, data: dict) -> Slide:
+        raw_num = data.get("slide", data.get("number", 0))
         return cls(
-            number=int(data.get("slide", 0)),
+            number=int(raw_num) if raw_num else 0,
             caption=str(data.get("caption", "")).strip(),
             image_prompt=str(data.get("image_prompt", "")).strip(),
         )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import io
 import json
 import re
@@ -36,6 +37,10 @@ def extract_json_array(raw: str) -> list[dict]:
     if match:
         cleaned = match.group(0)
     return json.loads(cleaned)
+
+
+def escape_html(text: str) -> str:
+    return html.escape(text, quote=False)
 
 
 def topic_hash(topic: str) -> str:

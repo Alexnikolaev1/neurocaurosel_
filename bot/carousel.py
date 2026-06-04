@@ -15,6 +15,7 @@ from bot.services.scenario_fallback import generate_fallback_scenario
 from bot.services.images import ImageGenerator
 from bot.services.telegram import TelegramClient
 from bot.session_store import delete_session, load_session, save_session, storage_mode
+from bot.utils import escape_html
 from bot import keyboards, texts
 
 logger = logging.getLogger("neurocarousel.carousel")
@@ -90,6 +91,8 @@ class CarouselOrchestrator:
                     await self._finish_scenario(
                         job, status_message_id, slides, used_fallback=True
                     )
+                    if self._settings.auto_draw_first:
+                        await self._auto_draw_first(job.chat_id, http)
                     return
                 except Exception:
                     logger.exception("Scenario generation failed")
@@ -101,6 +104,8 @@ class CarouselOrchestrator:
                 await self._finish_scenario(
                     job, status_message_id, slides, used_fallback=False
                 )
+                if self._settings.auto_draw_first:
+                    await self._auto_draw_first(job.chat_id, http)
         finally:
             self._jobs.release(chat_id)
 
@@ -133,29 +138,48 @@ class CarouselOrchestrator:
         )
         await self._tg.edit_message(job.chat_id, status_message_id, ready_text)
 
-        end = min(session.batch_size, session.total)
-        hint = texts.draw_hint_continue_text()
-        await self._tg.send_message(
-            job.chat_id,
-            f"{texts.draw_batch_prompt(1, end)}\n\n{hint}",
-            reply_markup=keyboards.draw_batch_keyboard(1, end),
-        )
+        if not self._settings.auto_draw_first:
+            end = min(session.batch_size, session.total)
+            await self._tg.send_message(
+                job.chat_id,
+                f"{texts.draw_batch_prompt(1, end)}\n\n{texts.draw_hint_continue_text()}",
+                reply_markup=keyboards.draw_batch_keyboard(1, end),
+            )
+
+    async def _auto_draw_first(self, chat_id: int, http: Any) -> None:
+        """Первый слайд в том же запросе, что и сценарий (меньше кликов, один инстанс)."""
+        session = await load_session(chat_id)
+        if not session or not session.has_more():
+            return
+        logger.info("Auto-draw first slide chat=%s", chat_id)
+        images_svc = ImageGenerator(self._settings, http)
+        await self._run_one_batch(session, images_svc)
 
     async def draw_next_batch(self, chat_id: int) -> None:
         session = await load_session(chat_id)
         if not session:
+            logger.warning("Draw: no session chat=%s", chat_id)
             await self._tg.send_message(chat_id, texts.session_not_found())
             return
         if not session.has_more():
+            logger.info("Draw: already complete chat=%s", chat_id)
             await self._tg.send_message(chat_id, texts.success_batches(session.total))
             await delete_session(chat_id)
             return
 
         if not self._jobs.try_acquire(chat_id):
+            logger.info("Draw: busy chat=%s", chat_id)
             await self._tg.send_message(chat_id, texts.job_in_progress())
             return
 
         draw_timeout = self._settings.function_timeout_sec - 5
+        logger.info(
+            "Draw start chat=%s slide_idx=%d/%d mode=%s",
+            chat_id,
+            session.next_index,
+            session.total,
+            session.text_mode.value,
+        )
 
         try:
             async with http_session(self._settings) as http:
@@ -190,10 +214,16 @@ class CarouselOrchestrator:
 
         if sent == 0:
             label = str(from_n) if from_n == to_n else f"{from_n}–{to_n}"
+            fail_text = texts.batch_images_failed(label)
             await self._tg.edit_message(
                 session.chat_id,
                 session.status_message_id,
-                texts.batch_images_failed(label),
+                fail_text,
+            )
+            await self._tg.send_message(
+                session.chat_id,
+                fail_text,
+                reply_markup=keyboards.draw_batch_keyboard(from_n, to_n),
             )
             return
 
@@ -251,6 +281,8 @@ class CarouselOrchestrator:
         for slide in batch:
             await self._tg.send_chat_action(session.chat_id)
             raw = await images_svc.generate(slide.image_prompt, raw=overlay)
+            if not raw:
+                logger.error("Image gen failed slide=%d chat=%s", slide.number, session.chat_id)
             if raw:
                 data = (
                     prepare_slide_image(
@@ -287,7 +319,8 @@ class CarouselOrchestrator:
     ) -> str:
         if text_mode == TextMode.TEXT_ON_IMAGE:
             return f"<b>{slide.number}/{total_slides}</b> · текст на картинке"[:1024]
-        return f"<b>{slide.number}/{total_slides}</b>\n{slide.caption}"[:1024]
+        safe = escape_html(slide.caption)
+        return f"<b>{slide.number}/{total_slides}</b>\n{safe}"[:1024]
 
     async def _send_slides(
         self,

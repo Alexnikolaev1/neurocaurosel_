@@ -139,7 +139,12 @@ image_prompt — на английском, стиль: {style_hint}.
         if not isinstance(slides_raw, list):
             raise ValueError("Gemini response is not a JSON array")
 
-        slides = [Slide.from_dict(item) for item in slides_raw]
+        slides: list[Slide] = []
+        for i, item in enumerate(slides_raw):
+            s = Slide.from_dict(item)
+            if s.number <= 0:
+                s = Slide(number=i + 1, caption=s.caption, image_prompt=s.image_prompt)
+            slides.append(s)
         slides = [s for s in slides if s.caption and s.image_prompt]
 
         if len(slides) < count:

@@ -67,7 +67,13 @@ class handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(length)
             update = json.loads(body)
-            logger.info("Update: %s", json.dumps(update, ensure_ascii=False)[:300])
+            kind = "callback" if "callback_query" in update else "message"
+            extra = ""
+            if cq := update.get("callback_query"):
+                extra = f" data={cq.get('data', '')}"
+            elif msg := update.get("message"):
+                extra = f" text={(msg.get('text') or '')[:40]}"
+            logger.info("Update %s%s", kind, extra)
 
             bot = _get_bot()
             asyncio.run(bot.handle_update(update))
@@ -75,7 +81,7 @@ class handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"OK")
-            logger.info("Update processed OK")
+            logger.info("Update %s done", kind)
         except Exception:
             logger.exception("Webhook error")
             self.send_response(500)

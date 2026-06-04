@@ -13,6 +13,8 @@ from bot.utils import compress_image
 
 logger = logging.getLogger("neurocarousel.images")
 
+_MIN_BYTES = 2000
+
 
 class ImageGenerator:
     def __init__(self, settings: Settings, http: httpx.AsyncClient) -> None:
@@ -21,16 +23,32 @@ class ImageGenerator:
         self._headers = {"Authorization": f"Bearer {settings.hf_key}"}
 
     async def generate(self, prompt: str, *, raw: bool = False) -> bytes | None:
-        if self._settings.pollinations_only:
-            image = await self._generate_pollinations(prompt)
-            return image if (image and raw) else (self._optimize(image) if image else None)
+        short_prompt = self._shorten_prompt(prompt)
 
-        image = await self._generate_hf(prompt)
+        if self._settings.pollinations_only:
+            image = await self._generate_pollinations(short_prompt)
+            if not image and self._settings.serverless_mode:
+                image = await self._generate_hf(short_prompt, fast=True)
+            return self._finalize(image, raw=raw)
+
+        image = await self._generate_hf(short_prompt)
         if image:
-            return image if raw else self._optimize(image)
-        logger.warning("HF failed, trying Pollinations fallback")
-        image = await self._generate_pollinations(prompt)
-        return image if (image and raw) else (self._optimize(image) if image else None)
+            return self._finalize(image, raw=raw)
+        logger.warning("HF failed, trying Pollinations")
+        image = await self._generate_pollinations(short_prompt)
+        return self._finalize(image, raw=raw)
+
+    def _finalize(self, image: bytes | None, *, raw: bool) -> bytes | None:
+        if not image:
+            return None
+        return image if raw else self._optimize(image)
+
+    def _shorten_prompt(self, prompt: str) -> str:
+        p = " ".join(prompt.split())
+        limit = 380 if self._settings.serverless_mode else 700
+        if len(p) > limit:
+            p = p[: limit - 3] + "..."
+        return p
 
     def _optimize(self, data: bytes) -> bytes:
         return compress_image(
@@ -39,28 +57,30 @@ class ImageGenerator:
             quality=self._settings.image_jpeg_quality,
         )
 
-    async def _generate_hf(self, prompt: str) -> bytes | None:
+    async def _generate_hf(self, prompt: str, *, fast: bool = False) -> bytes | None:
         payload = {
             "inputs": prompt,
             "parameters": {
-                "num_inference_steps": 28,
+                "num_inference_steps": 18 if fast else 28,
                 "guidance_scale": 7.5,
-                "width": 1024,
-                "height": 1024,
+                "width": 768 if fast else 1024,
+                "height": 768 if fast else 1024,
             },
         }
+        timeout = 25.0 if fast else 90.0
+        attempts = 1 if fast else self._settings.hf_retry_count
 
-        for attempt in range(1, self._settings.hf_retry_count + 1):
+        for attempt in range(1, attempts + 1):
             try:
                 logger.info("HF attempt %d: %s", attempt, prompt[:60])
                 r = await self._http.post(
                     HF_URL,
                     headers=self._headers,
                     json=payload,
-                    timeout=90,
+                    timeout=timeout,
                 )
 
-                if r.status_code == 200 and len(r.content) > 1000:
+                if r.status_code == 200 and len(r.content) >= _MIN_BYTES:
                     return r.content
 
                 if r.status_code in (429, 503):
@@ -74,24 +94,40 @@ class ImageGenerator:
 
             except httpx.TimeoutException:
                 logger.warning("HF timeout on attempt %d", attempt)
-                await asyncio.sleep(self._settings.hf_retry_delay)
+                if not fast:
+                    await asyncio.sleep(self._settings.hf_retry_delay)
 
         return None
 
     def _pollinations_timeout(self) -> float:
-        return 35.0 if self._settings.serverless_mode else 60.0
+        return 28.0 if self._settings.serverless_mode else 60.0
 
     async def _generate_pollinations(self, prompt: str) -> bytes | None:
-        encoded = urllib.parse.quote(prompt[:500])
+        encoded = urllib.parse.quote(prompt, safe="")
         url = POLLINATIONS_URL.format(prompt=encoded)
         timeout = self._pollinations_timeout()
-        try:
-            logger.info("Pollinations: %s (timeout=%.0fs)", prompt[:60], timeout)
-            r = await self._http.get(url, timeout=timeout, follow_redirects=True)
-            if r.status_code == 200 and len(r.content) > 1000:
-                return r.content
-        except Exception as exc:
-            logger.error("Pollinations error: %s", exc)
+        retries = 2 if self._settings.serverless_mode else 1
+
+        for attempt in range(1, retries + 1):
+            try:
+                logger.info("Pollinations attempt %d: %s", attempt, prompt[:50])
+                r = await self._http.get(url, timeout=timeout, follow_redirects=True)
+                size = len(r.content)
+                if r.status_code == 200 and size >= _MIN_BYTES:
+                    logger.info("Pollinations ok bytes=%d", size)
+                    return r.content
+                logger.warning(
+                    "Pollinations bad response status=%s bytes=%d",
+                    r.status_code,
+                    size,
+                )
+            except httpx.TimeoutException:
+                logger.warning("Pollinations timeout attempt %d", attempt)
+            except Exception as exc:
+                logger.error("Pollinations error: %s", exc)
+            if attempt < retries:
+                await asyncio.sleep(1.5)
+
         return None
 
     @property

@@ -86,22 +86,37 @@ async def save_session(session: CarouselSession) -> None:
     _memory[session.chat_id] = payload
 
     if not _redis_configured():
+        logger.info("Session saved (memory-only) chat=%s", session.chat_id)
         return
 
     result = await _redis_command(["SET", _redis_key(session.chat_id), payload, "EX", _TTL_SEC])
-    if result and result.get("result") != "OK":
-        logger.warning("Upstash SET unexpected: %s", result)
+    if not result or result.get("result") != "OK":
+        logger.error("Upstash SET failed chat=%s: %s", session.chat_id, result)
+    else:
+        logger.info("Session saved (upstash) chat=%s slides=%d idx=%d", session.chat_id, session.total, session.next_index)
 
 
 async def load_session(chat_id: int) -> CarouselSession | None:
-    payload = _memory.get(chat_id)
-
-    if not payload and _redis_configured():
+    # На Vercel несколько инстансов: память может быть устаревшей — Redis источник правды.
+    if _redis_configured():
         result = await _redis_command(["GET", _redis_key(chat_id)])
         if result and result.get("result"):
             payload = result["result"]
             _memory[chat_id] = payload
+            session = deserialize_session(payload)
+            if session:
+                logger.info(
+                    "Session loaded (upstash) chat=%s idx=%d/%d",
+                    chat_id,
+                    session.next_index,
+                    session.total,
+                )
+            return session
+        _memory.pop(chat_id, None)
+        logger.warning("Session not in Redis chat=%s", chat_id)
+        return None
 
+    payload = _memory.get(chat_id)
     if not payload:
         return None
     return deserialize_session(payload)
