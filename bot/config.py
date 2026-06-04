@@ -35,6 +35,7 @@ class Settings:
     )
     serverless_mode: bool = False
     pollinations_only: bool = False
+    pollinations_api_key: str = ""
     function_timeout_sec: float = 55.0
 
     @classmethod
@@ -64,7 +65,7 @@ def build_settings(
     slides = int(os.getenv("SLIDES_COUNT", default_slides))
     batch_size = int(os.getenv("BATCH_SIZE", default_batch))
 
-    pollinations_only = os.getenv("POLLINATIONS_ONLY", "1" if serverless else "0") == "1"
+    pollinations_only = os.getenv("POLLINATIONS_ONLY", "0" if serverless else "0") == "1"
     between_delay = float(os.getenv("HF_BETWEEN_DELAY", "0.5" if serverless else "2.5"))
 
     timeout = float(os.getenv("FUNCTION_TIMEOUT_SEC", "55" if serverless else "300"))
@@ -79,6 +80,7 @@ def build_settings(
         gemini_models=tuple(m.strip() for m in models_raw.split(",") if m.strip()),
         serverless_mode=serverless,
         pollinations_only=pollinations_only,
+        pollinations_api_key=os.getenv("POLLINATIONS_API_KEY", "").strip(),
         hf_between_delay=between_delay,
         function_timeout_sec=timeout,
         image_max_size=int(os.getenv("IMAGE_MAX_SIZE", "1024" if serverless else "1280")),
@@ -102,9 +104,18 @@ def gemini_url(model: str, key: str) -> str:
 
 HF_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
 
+HF_ROUTER_TEMPLATE = "https://router.huggingface.co/hf-inference/models/{model}"
+
+HF_IMAGE_MODELS = (
+    "black-forest-labs/FLUX.1-schnell",
+    "stabilityai/stable-diffusion-xl-base-1.0",
+)
+
+GEN_POLLINATIONS_TEMPLATE = "https://gen.pollinations.ai/image/{prompt}"
+
 POLLINATIONS_URL = (
     "https://image.pollinations.ai/prompt/{prompt}"
-    "?width=768&height=768&nologo=true&enhance=false"
+    "?width=512&height=512&nologo=true"
 )
 
 STYLE_PRESETS: dict[str, str] = {

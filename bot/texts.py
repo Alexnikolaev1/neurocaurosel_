@@ -275,8 +275,10 @@ def batch_continue_prompt(slide_from: int, slide_to: int) -> str:
 
 def batch_images_failed(range_label: str) -> str:
     return (
-        f"😔 Слайд {range_label}: картинка не сгенерировалась или не отправилась в Telegram.\n"
-        "Нажми кнопку ещё раз или отправь новую тему."
+        f"😔 Слайд {range_label}: не удалось сгенерировать картинку.\n\n"
+        "На Vercel нужен рабочий <b>HF_API_KEY</b> (Inference Providers) "
+        "или <b>POLLINATIONS_API_KEY</b> с enter.pollinations.ai.\n"
+        "Проверь переменные в Vercel и нажми кнопку ещё раз."
     )
 
 

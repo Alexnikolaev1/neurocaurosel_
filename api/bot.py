@@ -23,7 +23,7 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 logger = logging.getLogger("neurocarousel.webhook")
-BUILD_TAG = "separate-draw-v3"
+BUILD_TAG = "hf-router-v4"
 
 _bot = None
 
