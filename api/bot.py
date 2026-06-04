@@ -23,6 +23,7 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 logger = logging.getLogger("neurocarousel.webhook")
+BUILD_TAG = "separate-draw-v3"
 
 _bot = None
 
@@ -73,7 +74,7 @@ class handler(BaseHTTPRequestHandler):
                 extra = f" data={cq.get('data', '')}"
             elif msg := update.get("message"):
                 extra = f" text={(msg.get('text') or '')[:40]}"
-            logger.info("Update %s%s", kind, extra)
+            logger.info("Update %s%s [%s]", kind, extra, BUILD_TAG)
 
             bot = _get_bot()
             asyncio.run(bot.handle_update(update))
@@ -84,9 +85,10 @@ class handler(BaseHTTPRequestHandler):
             logger.info("Update %s done", kind)
         except Exception:
             logger.exception("Webhook error")
-            self.send_response(500)
+            # 200 — иначе Telegram шлёт повтор и усиливает EBUSY на Vercel
+            self.send_response(200)
             self.end_headers()
-            self.wfile.write(b"error")
+            self.wfile.write(b"OK")
 
     def log_message(self, format, *args):  # noqa: A002
         logger.debug(format, *args)

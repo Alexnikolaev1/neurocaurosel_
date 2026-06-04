@@ -36,7 +36,6 @@ class Settings:
     serverless_mode: bool = False
     pollinations_only: bool = False
     function_timeout_sec: float = 55.0
-    auto_draw_first: bool = False
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -83,7 +82,6 @@ def build_settings(
         hf_between_delay=between_delay,
         function_timeout_sec=timeout,
         image_max_size=int(os.getenv("IMAGE_MAX_SIZE", "1024" if serverless else "1280")),
-        auto_draw_first=os.getenv("AUTO_DRAW_FIRST", "1" if serverless else "0") == "1",
     )
 
 
@@ -106,7 +104,7 @@ HF_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusi
 
 POLLINATIONS_URL = (
     "https://image.pollinations.ai/prompt/{prompt}"
-    "?width=768&height=768&nologo=true&enhance=false&model=turbo"
+    "?width=768&height=768&nologo=true&enhance=false"
 )
 
 STYLE_PRESETS: dict[str, str] = {

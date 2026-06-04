@@ -35,7 +35,7 @@ class ScenarioGenerator:
 
     def _models(self) -> list[str]:
         if self._settings.serverless_mode:
-            return ["gemini-2.0-flash-lite", "gemini-2.0-flash"]
+            return ["gemini-2.0-flash-lite"]
 
         seen: set[str] = set()
         result: list[str] = []
@@ -77,7 +77,7 @@ image_prompt — на английском, стиль: {style_hint}.
 
         last_status: int | None = None
         models = self._models()
-        retries = self._settings.gemini_retry_count
+        retries = 1 if self._settings.serverless_mode else self._settings.gemini_retry_count
 
         for model in models:
             url = gemini_url(model, self._settings.gemini_key)
@@ -96,6 +96,9 @@ image_prompt — на английском, стиль: {style_hint}.
 
                     if r.status_code == 429:
                         hit_429 = True
+                        if self._settings.serverless_mode:
+                            logger.warning("Gemini 429 on %s — fallback scenario", model)
+                            raise GeminiRateLimitError("Gemini rate limit (429)")
                         wait = min(20.0, self._settings.gemini_retry_base_delay * (2 ** attempt))
                         logger.warning("Gemini 429 on %s, wait %.1fs", model, wait)
                         await asyncio.sleep(wait)
@@ -115,6 +118,8 @@ image_prompt — на английском, стиль: {style_hint}.
                         break
                     if exc.response.status_code == 429:
                         hit_429 = True
+                        if self._settings.serverless_mode:
+                            raise GeminiRateLimitError("Gemini rate limit (429)")
                         wait = min(20.0, self._settings.gemini_retry_base_delay * (2 ** attempt))
                         await asyncio.sleep(wait)
                         continue

@@ -61,9 +61,8 @@ def generate_fallback_scenario(
         caption = cap_tpl.format(topic=topic_short)
         scene = _IMAGE_SCENES[i] if i < len(_IMAGE_SCENES) else _IMAGE_SCENES[-1]
         image_prompt = (
-            f"{scene.format(topic=topic_short)}, {style_hint}, "
-            "high quality, no text, no watermark"
-        )
+            f"{scene.format(topic=topic_short)}, {style_hint}, no text"
+        )[:200]
         slides.append(Slide(number=i + 1, caption=caption, image_prompt=image_prompt))
 
     return slides

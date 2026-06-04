@@ -57,6 +57,7 @@ class CarouselOrchestrator:
             await self._tg.send_message(chat_id, texts.job_in_progress())
             return
 
+        await delete_session(chat_id)
         scenario_timeout = min(self._settings.function_timeout_sec - 10, 48.0)
 
         try:
@@ -91,8 +92,6 @@ class CarouselOrchestrator:
                     await self._finish_scenario(
                         job, status_message_id, slides, used_fallback=True
                     )
-                    if self._settings.auto_draw_first:
-                        await self._auto_draw_first(job.chat_id, http)
                     return
                 except Exception:
                     logger.exception("Scenario generation failed")
@@ -104,8 +103,6 @@ class CarouselOrchestrator:
                 await self._finish_scenario(
                     job, status_message_id, slides, used_fallback=False
                 )
-                if self._settings.auto_draw_first:
-                    await self._auto_draw_first(job.chat_id, http)
         finally:
             self._jobs.release(chat_id)
 
@@ -138,22 +135,12 @@ class CarouselOrchestrator:
         )
         await self._tg.edit_message(job.chat_id, status_message_id, ready_text)
 
-        if not self._settings.auto_draw_first:
-            end = min(session.batch_size, session.total)
-            await self._tg.send_message(
-                job.chat_id,
-                f"{texts.draw_batch_prompt(1, end)}\n\n{texts.draw_hint_continue_text()}",
-                reply_markup=keyboards.draw_batch_keyboard(1, end),
-            )
-
-    async def _auto_draw_first(self, chat_id: int, http: Any) -> None:
-        """Первый слайд в том же запросе, что и сценарий (меньше кликов, один инстанс)."""
-        session = await load_session(chat_id)
-        if not session or not session.has_more():
-            return
-        logger.info("Auto-draw first slide chat=%s", chat_id)
-        images_svc = ImageGenerator(self._settings, http)
-        await self._run_one_batch(session, images_svc)
+        end = min(session.batch_size, session.total)
+        await self._tg.send_message(
+            job.chat_id,
+            f"{texts.draw_batch_prompt(1, end)}\n\n{texts.draw_hint_continue_text()}",
+            reply_markup=keyboards.draw_batch_keyboard(1, end),
+        )
 
     async def draw_next_batch(self, chat_id: int) -> None:
         session = await load_session(chat_id)
@@ -182,20 +169,30 @@ class CarouselOrchestrator:
         )
 
         try:
-            async with http_session(self._settings) as http:
-                images_svc = ImageGenerator(self._settings, http)
-                try:
-                    await asyncio.wait_for(
-                        self._run_one_batch(session, images_svc),
-                        timeout=draw_timeout,
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning("Draw batch timeout chat=%s", chat_id)
-                    await save_session(session)
-                    await self._tg.send_message(
-                        chat_id,
-                        texts.draw_timeout_continue(session.next_index, session.total),
-                    )
+            images_svc = ImageGenerator(self._settings)
+            try:
+                await asyncio.wait_for(
+                    self._run_one_batch(session, images_svc),
+                    timeout=draw_timeout,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Draw batch timeout chat=%s", chat_id)
+                await save_session(session)
+                await self._tg.send_message(
+                    chat_id,
+                    texts.draw_timeout_continue(session.next_index, session.total),
+                )
+        except Exception:
+            logger.exception("Draw failed chat=%s", chat_id)
+            await save_session(session)
+            batch = session.batch_slides()
+            if batch:
+                n = batch[0].number
+                await self._tg.send_message(
+                    chat_id,
+                    texts.batch_images_failed(str(n)),
+                    reply_markup=keyboards.draw_batch_keyboard(n, n),
+                )
         finally:
             self._jobs.release(chat_id)
 
