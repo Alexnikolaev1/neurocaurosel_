@@ -59,7 +59,12 @@ class CarouselOrchestrator:
             return
 
         await delete_session(chat_id)
-        scenario_timeout = min(self._settings.function_timeout_sec - 10, 48.0)
+        budget = self._settings.function_timeout_sec - 4
+        if self._settings.gemini_scenario_timeout > 0:
+            scenario_timeout = min(self._settings.gemini_scenario_timeout, budget)
+        else:
+            scenario_timeout = budget
+        logger.info("Scenario timeout budget=%.0fs", scenario_timeout)
 
         try:
             async with http_session(self._settings) as http:
@@ -96,12 +101,20 @@ class CarouselOrchestrator:
                         timeout=scenario_timeout,
                     )
                 except asyncio.TimeoutError:
+                    logger.warning(
+                        "Scenario wait_for timeout (%.0fs) chat=%s",
+                        scenario_timeout,
+                        chat_id,
+                    )
                     await self._tg.edit_message(
-                        chat_id, status_message_id, texts.scenario_timeout()
+                        chat_id, status_message_id, texts.scenario_timeout(scenario_timeout)
                     )
                     return
                 except GeminiRateLimitError:
-                    logger.warning("Gemini 429 — fallback scenario chat=%s", chat_id)
+                    logger.warning(
+                        "Gemini 429 after all models/retries — fallback chat=%s",
+                        chat_id,
+                    )
                     slides = generate_fallback_scenario(
                         job.topic,
                         self._settings.slides_count,

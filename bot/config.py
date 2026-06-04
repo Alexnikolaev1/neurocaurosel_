@@ -6,7 +6,7 @@ import json
 import os
 from dataclasses import dataclass
 
-BUILD_TAG = "v9-redraw-slide"
+BUILD_TAG = "v10-gemini-retries"
 
 
 def pollinations_key_from_env() -> str:
@@ -63,6 +63,8 @@ class Settings:
     default_style: str = "cinematic"
     gemini_retry_count: int = 2
     gemini_retry_base_delay: float = 3.0
+    gemini_request_timeout: float = 60.0
+    gemini_scenario_timeout: float = 0.0
     gemini_models: tuple[str, ...] = (
         "gemini-2.0-flash",
         "gemini-2.0-flash-lite",
@@ -123,6 +125,14 @@ def build_settings(
         hf_between_delay=between_delay,
         function_timeout_sec=timeout,
         image_max_size=int(os.getenv("IMAGE_MAX_SIZE", "1024" if serverless else "1280")),
+        gemini_retry_count=int(os.getenv("GEMINI_RETRY_COUNT", "3" if serverless else "2")),
+        gemini_retry_base_delay=float(
+            os.getenv("GEMINI_RETRY_BASE_DELAY", "6.0" if serverless else "3.0"),
+        ),
+        gemini_request_timeout=float(
+            os.getenv("GEMINI_REQUEST_TIMEOUT", "42" if serverless else "60"),
+        ),
+        gemini_scenario_timeout=float(os.getenv("GEMINI_SCENARIO_TIMEOUT", "0")),
     )
 
 

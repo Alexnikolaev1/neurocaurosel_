@@ -47,6 +47,12 @@ class ScenarioGenerator:
                 result.append(name)
         return result or ["gemini-2.0-flash", "gemini-2.0-flash-lite"]
 
+    def _retry_wait(self, attempt: int) -> float:
+        base = self._settings.gemini_retry_base_delay
+        if self._settings.serverless_mode:
+            return min(18.0, base * attempt)
+        return min(25.0, base * (2 ** (attempt - 1)))
+
     async def generate(
         self,
         topic: str,
@@ -83,46 +89,45 @@ image_prompt — на английском, сцена про тему, стил
 
         last_status: int | None = None
         models = self._models()
-        retries = 2 if self._settings.serverless_mode else self._settings.gemini_retry_count
+        retries = self._settings.gemini_retry_count
+        req_timeout = self._settings.gemini_request_timeout
+        saw_429 = False
 
         for model in models:
             url = gemini_url(model, self._settings.gemini_key)
-            hit_429 = False
+            model_failed_429 = False
 
             for attempt in range(1, retries + 1):
-                logger.info("Gemini %s attempt %d for: %s", model, attempt, topic[:60])
+                logger.info("Gemini %s attempt %d/%d for: %s", model, attempt, retries, topic[:60])
                 try:
-                    req_timeout = 35.0 if self._settings.serverless_mode else 60.0
                     r = await self._http.post(url, json=payload, timeout=req_timeout)
                     last_status = r.status_code
 
                     if r.status_code in (404, 400):
-                        logger.warning("Gemini %s HTTP %s, skip", model, r.status_code)
+                        logger.warning("Gemini %s HTTP %s, skip model", model, r.status_code)
                         break
 
                     if r.status_code == 429:
-                        hit_429 = True
-                        if self._settings.serverless_mode:
-                            if attempt < retries:
-                                wait = min(4.0, self._settings.gemini_retry_base_delay * attempt)
-                                logger.warning(
-                                    "Gemini 429 on %s, retry %d/%d in %.1fs",
-                                    model,
-                                    attempt,
-                                    retries,
-                                    wait,
-                                )
-                                await asyncio.sleep(wait)
-                                continue
-                            logger.warning("Gemini 429 on %s — fallback scenario", model)
-                            raise GeminiRateLimitError("Gemini rate limit (429)")
-                        wait = min(20.0, self._settings.gemini_retry_base_delay * (2 ** attempt))
-                        logger.warning("Gemini 429 on %s, wait %.1fs", model, wait)
-                        await asyncio.sleep(wait)
-                        continue
+                        saw_429 = True
+                        model_failed_429 = True
+                        last_status = 429
+                        if attempt < retries:
+                            wait = self._retry_wait(attempt)
+                            logger.warning(
+                                "Gemini 429 on %s, retry %d/%d in %.1fs",
+                                model,
+                                attempt,
+                                retries,
+                                wait,
+                            )
+                            await asyncio.sleep(wait)
+                            continue
+                        logger.warning("Gemini 429 on %s — try next model", model)
+                        break
 
                     if r.status_code in (503, 500):
                         wait = self._settings.gemini_retry_base_delay * attempt
+                        logger.warning("Gemini %s HTTP %s, wait %.1fs", model, r.status_code, wait)
                         await asyncio.sleep(wait)
                         continue
 
@@ -134,27 +139,26 @@ image_prompt — на английском, сцена про тему, стил
                     if exc.response.status_code in (404, 400):
                         break
                     if exc.response.status_code == 429:
-                        hit_429 = True
-                        if self._settings.serverless_mode:
-                            if attempt < retries:
-                                wait = min(4.0, self._settings.gemini_retry_base_delay * attempt)
-                                await asyncio.sleep(wait)
-                                continue
-                            raise GeminiRateLimitError("Gemini rate limit (429)")
-                        wait = min(20.0, self._settings.gemini_retry_base_delay * (2 ** attempt))
-                        await asyncio.sleep(wait)
-                        continue
+                        saw_429 = True
+                        model_failed_429 = True
+                        if attempt < retries:
+                            await asyncio.sleep(self._retry_wait(attempt))
+                            continue
+                        break
                     logger.error("Gemini %s HTTP %s", model, exc.response.status_code)
                     break
                 except (httpx.TimeoutException, httpx.TransportError) as exc:
-                    logger.warning("Gemini transport on %s: %s", model, exc)
-                    await asyncio.sleep(self._settings.gemini_retry_base_delay)
+                    logger.warning("Gemini transport on %s attempt %d: %s", model, attempt, exc)
+                    if attempt < retries:
+                        await asyncio.sleep(self._settings.gemini_retry_base_delay)
+                        continue
+                    break
 
-            if hit_429:
+            if model_failed_429:
                 logger.info("Switching model after 429 on %s", model)
                 continue
 
-        if last_status == 429:
+        if last_status == 429 or saw_429:
             raise GeminiRateLimitError("Gemini rate limit (429)")
         raise GeminiError(f"Gemini failed (last HTTP {last_status})")
 

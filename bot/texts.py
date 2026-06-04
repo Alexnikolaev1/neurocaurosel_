@@ -114,10 +114,11 @@ def scenario_error() -> str:
     return "😔 Не удалось придумать сценарий. Попробуй переформулировать тему."
 
 
-def scenario_timeout() -> str:
+def scenario_timeout(budget_sec: float = 0) -> str:
+    limit = f" (~{int(budget_sec)} с)" if budget_sec > 0 else ""
     return (
-        "⏱ Сценарий не успел сгенерироваться за лимит сервера.\n"
-        "Попробуй тему короче или повтори через минуту."
+        f"⏱ Сценарий не уложился в лимит сервера{limit} — это <b>не</b> «Gemini перегружен».\n"
+        "Подожди минуту и отправь тему снова (короче — быстрее)."
     )
 
 
@@ -143,8 +144,9 @@ def scenario_ready_fallback(total: int, topic: str, batch_size: int = 1) -> str:
     base = scenario_ready(total, topic, batch_size)
     return (
         f"{base}\n\n"
-        f"⚠️ <i>Gemini перегружен — сценарий из шаблона (общие фразы). "
-        f"Повтори тему «{short}» через 1–2 мин для уникального текста.</i>"
+        f"⚠️ <i>Gemini ответил «лимит запросов» (429) после нескольких попыток — "
+        f"временно отдал шаблон (общие фразы). Подожди 2–3 мин и снова отправь "
+        f"«{short}» — не жми тему много раз подряд.</i>"
     )
 
 
