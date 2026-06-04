@@ -6,7 +6,7 @@ import asyncio
 import logging
 from typing import Any
 
-from bot.config import Settings
+from bot.config import BUILD_TAG, Settings
 from bot.http_client import http_session
 from bot.image_overlay import prepare_slide_image
 from bot.models import CarouselJob, CarouselSession, Slide, TextMode
@@ -159,13 +159,16 @@ class CarouselOrchestrator:
             await self._tg.send_message(chat_id, texts.job_in_progress())
             return
 
-        draw_timeout = self._settings.function_timeout_sec - 5
+        draw_timeout = self._settings.function_timeout_sec - 3
         logger.info(
-            "Draw start chat=%s slide_idx=%d/%d mode=%s",
+            "Draw start [%s] chat=%s idx=%d/%d poll_only=%s poll_key=%s hf_key=%s",
+            BUILD_TAG,
             chat_id,
             session.next_index,
             session.total,
-            session.text_mode.value,
+            self._settings.pollinations_only,
+            bool(self._settings.pollinations_api_key),
+            bool(self._settings.hf_key),
         )
 
         try:
@@ -211,7 +214,7 @@ class CarouselOrchestrator:
 
         if sent == 0:
             label = str(from_n) if from_n == to_n else f"{from_n}–{to_n}"
-            fail_text = texts.batch_images_failed(label)
+            fail_text = texts.batch_images_failed(label, images_svc.last_trace)
             await self._tg.edit_message(
                 session.chat_id,
                 session.status_message_id,
@@ -279,7 +282,12 @@ class CarouselOrchestrator:
             await self._tg.send_chat_action(session.chat_id)
             raw = await images_svc.generate(slide.image_prompt, raw=overlay)
             if not raw:
-                logger.error("Image gen failed slide=%d chat=%s", slide.number, session.chat_id)
+                logger.error(
+                    "Image gen failed slide=%d chat=%s trace=%s",
+                    slide.number,
+                    session.chat_id,
+                    images_svc.last_trace,
+                )
             if raw:
                 data = (
                     prepare_slide_image(

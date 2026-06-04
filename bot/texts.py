@@ -273,12 +273,18 @@ def batch_continue_prompt(slide_from: int, slide_to: int) -> str:
     return f"Нажми кнопку — дорисую слайды <b>{slide_from}–{slide_to}</b> 👇"
 
 
-def batch_images_failed(range_label: str) -> str:
+def batch_images_failed(range_label: str, trace: str = "") -> str:
+    detail = ""
+    if trace:
+        from bot.utils import escape_html
+
+        detail = f"\n\n<i>Диагностика:</i>\n<code>{escape_html(trace[:400])}</code>"
     return (
-        f"😔 Слайд {range_label}: не удалось сгенерировать картинку.\n\n"
-        "На Vercel нужен рабочий <b>HF_API_KEY</b> (Inference Providers) "
-        "или <b>POLLINATIONS_API_KEY</b> с enter.pollinations.ai.\n"
-        "Проверь переменные в Vercel и нажми кнопку ещё раз."
+        f"😔 Слайд {range_label}: не удалось сгенерировать картинку.{detail}\n\n"
+        "Vercel: <b>POLLINATIONS_ONLY=0</b>, ключи "
+        "<b>HF_API_KEY</b> (Inference Providers) и/или "
+        "<b>POLLINATIONS_API_KEY</b> (enter.pollinations.ai).\n"
+        "Нажми кнопку ещё раз."
     )
 
 

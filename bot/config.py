@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+BUILD_TAG = "image-v5-hub"
+
 
 def _is_vercel() -> bool:
     return bool(os.getenv("VERCEL") or os.getenv("VERCEL_ENV"))

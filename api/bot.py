@@ -23,7 +23,8 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 logger = logging.getLogger("neurocarousel.webhook")
-BUILD_TAG = "hf-router-v4"
+
+from bot.config import BUILD_TAG  # noqa: E402
 
 _bot = None
 
