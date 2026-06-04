@@ -273,6 +273,16 @@ def batch_continue_prompt(slide_from: int, slide_to: int) -> str:
     return f"Нажми кнопку — дорисую слайды <b>{slide_from}–{slide_to}</b> 👇"
 
 
+def placeholder_hint() -> str:
+    return (
+        "⚠️ Это <b>заглушка</b> (API картинок не отвечает).\n"
+        "Открой в браузере: <code>https://neurocaurosel.vercel.app/api/bot</code> — "
+        "должно быть <code>\"build\": \"v7-placeholder\"</code> и "
+        "<code>\"pollinations_key_loaded\": true</code>.\n"
+        "Иначе добавь <b>POLLINATIONS_API_KEY</b> в Vercel и сделай <b>Redeploy</b>."
+    )
+
+
 def batch_images_failed(
     range_label: str,
     trace: str = "",

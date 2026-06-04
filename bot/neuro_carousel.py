@@ -14,12 +14,17 @@ class NeuroCarouselBot:
     """Thin facade delegating to UpdateRouter."""
 
     def __init__(self, token: str, gemini_key: str, hf_key: str) -> None:
+        self._token = token
+        self._gemini_key = gemini_key
+        self._hf_key = hf_key
+
+    def _router(self) -> UpdateRouter:
         settings = build_settings(
-            telegram_token=token,
-            gemini_key=gemini_key,
-            hf_key=hf_key,
+            telegram_token=self._token,
+            gemini_key=self._gemini_key,
+            hf_key=self._hf_key,
         )
-        self._router = UpdateRouter(settings)
+        return UpdateRouter(settings)
 
     async def handle_update(self, update: dict) -> None:
-        await self._router.handle(update)
+        await self._router().handle(update)

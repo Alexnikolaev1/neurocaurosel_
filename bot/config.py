@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 
-BUILD_TAG = "image-v6-poll"
+BUILD_TAG = "v7-placeholder"
 
 
 def pollinations_key_from_env() -> str:
@@ -20,6 +21,23 @@ def pollinations_key_from_env() -> str:
         if value:
             return value
     return ""
+
+
+def deployment_status_json() -> str:
+    """Для GET /api/bot — проверка деплоя и env без секретов."""
+    poll = pollinations_key_from_env()
+    poll_names = sorted(k for k in os.environ if "POLL" in k.upper())
+    data = {
+        "build": BUILD_TAG,
+        "pollinations_key_loaded": bool(poll),
+        "pollinations_key_length": len(poll),
+        "poll_env_variable_names": poll_names,
+        "hf_api_key_length": len(os.getenv("HF_API_KEY", "").strip()),
+        "skip_gemini": os.getenv("SKIP_GEMINI", "(default 1 on Vercel)"),
+        "pollinations_only": os.getenv("POLLINATIONS_ONLY", "0"),
+        "vercel": bool(os.getenv("VERCEL") or os.getenv("VERCEL_ENV")),
+    }
+    return json.dumps(data, ensure_ascii=False, indent=2)
 
 
 def _is_vercel() -> bool:
@@ -53,6 +71,7 @@ class Settings:
     pollinations_only: bool = False
     pollinations_api_key: str = ""
     skip_gemini: bool = False
+    placeholder_on_fail: bool = True
     function_timeout_sec: float = 55.0
 
     @classmethod
@@ -60,7 +79,7 @@ class Settings:
         return build_settings(
             telegram_token=_require("TELEGRAM_TOKEN"),
             gemini_key=_require("GEMINI_API_KEY"),
-            hf_key=_require("HF_API_KEY"),
+            hf_key=os.getenv("HF_API_KEY", "").strip(),
         )
 
 
@@ -86,6 +105,7 @@ def build_settings(
     between_delay = float(os.getenv("HF_BETWEEN_DELAY", "0.5" if serverless else "2.5"))
 
     timeout = float(os.getenv("FUNCTION_TIMEOUT_SEC", "55" if serverless else "300"))
+    poll_key = pollinations_key_from_env()
 
     return Settings(
         telegram_token=telegram_token,
@@ -97,8 +117,9 @@ def build_settings(
         gemini_models=tuple(m.strip() for m in models_raw.split(",") if m.strip()),
         serverless_mode=serverless,
         pollinations_only=pollinations_only,
-        pollinations_api_key=pollinations_key_from_env(),
+        pollinations_api_key=poll_key,
         skip_gemini=os.getenv("SKIP_GEMINI", "1" if serverless else "0") == "1",
+        placeholder_on_fail=os.getenv("PLACEHOLDER_ON_FAIL", "1") == "1",
         hf_between_delay=between_delay,
         function_timeout_sec=timeout,
         image_max_size=int(os.getenv("IMAGE_MAX_SIZE", "1024" if serverless else "1280")),

@@ -9,6 +9,7 @@ from typing import Any
 from bot.config import BUILD_TAG, Settings
 from bot.http_client import http_session
 from bot.image_overlay import prepare_slide_image
+from bot.placeholder_image import render_placeholder_slide
 from bot.models import CarouselJob, CarouselSession, Slide, TextMode
 from bot.services.gemini import GeminiRateLimitError, ScenarioGenerator
 from bot.services.scenario_fallback import generate_fallback_scenario
@@ -300,12 +301,26 @@ class CarouselOrchestrator:
             ),
         )
 
-        images: list[tuple[Slide, bytes]] = []
+        images: list[tuple[Slide, bytes, bool]] = []
         overlay = session.text_mode == TextMode.TEXT_ON_IMAGE
         for slide in batch:
             await self._tg.send_chat_action(session.chat_id)
             raw = await images_svc.generate(slide.image_prompt, raw=overlay)
-            if not raw:
+            used_placeholder = False
+            if not raw and self._settings.placeholder_on_fail:
+                logger.warning(
+                    "Placeholder slide=%d trace=%s",
+                    slide.number,
+                    images_svc.last_trace,
+                )
+                raw = render_placeholder_slide(
+                    slide.caption,
+                    slide_number=slide.number,
+                    total_slides=total,
+                    topic=session.topic,
+                )
+                used_placeholder = True
+            elif not raw:
                 logger.error(
                     "Image gen failed slide=%d chat=%s trace=%s",
                     slide.number,
@@ -313,8 +328,10 @@ class CarouselOrchestrator:
                     images_svc.last_trace,
                 )
             if raw:
-                data = (
-                    prepare_slide_image(
+                if used_placeholder or not overlay:
+                    data = raw
+                else:
+                    data = prepare_slide_image(
                         raw,
                         slide.caption,
                         slide_number=slide.number,
@@ -322,10 +339,7 @@ class CarouselOrchestrator:
                         text_mode=session.text_mode,
                         settings=self._settings,
                     )
-                    if overlay
-                    else raw
-                )
-                images.append((slide, data))
+                images.append((slide, data, used_placeholder))
             if slide != batch[-1]:
                 await asyncio.sleep(images_svc.between_delay)
 
@@ -333,6 +347,11 @@ class CarouselOrchestrator:
             return 0
 
         ok = await self._send_slides(session.chat_id, images, total, session.text_mode)
+        if ok and any(p for _, _, p in images):
+            await self._tg.send_message(
+                session.chat_id,
+                texts.placeholder_hint(),
+            )
         if not ok:
             logger.error("Telegram send failed chat=%s slides=%s", session.chat_id, batch[0].number)
             return 0
@@ -354,13 +373,13 @@ class CarouselOrchestrator:
     async def _send_slides(
         self,
         chat_id: int,
-        items: list[tuple[Slide, bytes]],
+        items: list[tuple[Slide, bytes, bool]],
         total_slides: int,
         text_mode: TextMode,
     ) -> bool:
         """Одно фото — sendPhoto; 2+ — sendMediaGroup (Telegram: группа от 2 шт.)."""
         if len(items) == 1:
-            slide, data = items[0]
+            slide, data, _placeholder = items[0]
             result = await self._tg.send_photo(
                 chat_id,
                 data,
@@ -371,7 +390,7 @@ class CarouselOrchestrator:
         media: list[dict[str, Any]] = []
         files: dict[str, bytes] = {}
 
-        for i, (slide, data) in enumerate(items):
+        for i, (slide, data, _placeholder) in enumerate(items):
             field = f"b{i}"
             files[field] = data
             media.append({

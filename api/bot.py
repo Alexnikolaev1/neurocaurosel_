@@ -68,10 +68,13 @@ def _get_bot():
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
+        from bot.config import deployment_status_json
+
+        body = deployment_status_json().encode("utf-8")
         self.send_response(200)
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
         self.end_headers()
-        self.wfile.write(b"NeuroCarousel bot is alive!")
+        self.wfile.write(body)
 
     def do_POST(self):  # noqa: N802
         try:
