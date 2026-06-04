@@ -6,7 +6,7 @@ import json
 import os
 from dataclasses import dataclass
 
-BUILD_TAG = "v7-placeholder"
+BUILD_TAG = "v8-gemini-default"
 
 
 def pollinations_key_from_env() -> str:
@@ -33,7 +33,7 @@ def deployment_status_json() -> str:
         "pollinations_key_length": len(poll),
         "poll_env_variable_names": poll_names,
         "hf_api_key_length": len(os.getenv("HF_API_KEY", "").strip()),
-        "skip_gemini": os.getenv("SKIP_GEMINI", "(default 1 on Vercel)"),
+        "skip_gemini": os.getenv("SKIP_GEMINI", "(default 0 on Vercel)"),
         "pollinations_only": os.getenv("POLLINATIONS_ONLY", "0"),
         "vercel": bool(os.getenv("VERCEL") or os.getenv("VERCEL_ENV")),
     }
@@ -118,7 +118,7 @@ def build_settings(
         serverless_mode=serverless,
         pollinations_only=pollinations_only,
         pollinations_api_key=poll_key,
-        skip_gemini=os.getenv("SKIP_GEMINI", "1" if serverless else "0") == "1",
+        skip_gemini=os.getenv("SKIP_GEMINI", "0") == "1",
         placeholder_on_fail=os.getenv("PLACEHOLDER_ON_FAIL", "1") == "1",
         hf_between_delay=between_delay,
         function_timeout_sec=timeout,

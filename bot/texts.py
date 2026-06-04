@@ -129,12 +129,23 @@ def _batch_info(total: int, batch_size: int) -> str:
 
 
 def scenario_ready_template(total: int, topic: str, batch_size: int = 1) -> str:
-    """Шаблонный сценарий (без вызова Gemini на Vercel)."""
-    return scenario_ready(total, topic, batch_size)
+    """Шаблонный сценарий (SKIP_GEMINI=1)."""
+    base = scenario_ready(total, topic, batch_size)
+    return (
+        f"{base}\n\n"
+        "<i>Сценарий из шаблона (SKIP_GEMINI). Для уникального текста убери "
+        "SKIP_GEMINI в Vercel или поставь 0.</i>"
+    )
 
 
 def scenario_ready_fallback(total: int, topic: str, batch_size: int = 1) -> str:
-    return scenario_ready_template(total, topic, batch_size)
+    short = topic if len(topic) <= 80 else topic[:77] + "…"
+    base = scenario_ready(total, topic, batch_size)
+    return (
+        f"{base}\n\n"
+        f"⚠️ <i>Gemini перегружен — сценарий из шаблона (общие фразы). "
+        f"Повтори тему «{short}» через 1–2 мин для уникального текста.</i>"
+    )
 
 
 def scenario_ready(total: int, topic: str, batch_size: int = 1) -> str:
@@ -277,7 +288,7 @@ def placeholder_hint() -> str:
     return (
         "⚠️ Это <b>заглушка</b> (API картинок не отвечает).\n"
         "Открой в браузере: <code>https://neurocaurosel.vercel.app/api/bot</code> — "
-        "должно быть <code>\"build\": \"v7-placeholder\"</code> и "
+        "должно быть <code>\"build\": \"v8-gemini-default\"</code> и "
         "<code>\"pollinations_key_loaded\": true</code>.\n"
         "Иначе добавь <b>POLLINATIONS_API_KEY</b> в Vercel и сделай <b>Redeploy</b>."
     )

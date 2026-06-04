@@ -35,7 +35,7 @@ class ScenarioGenerator:
 
     def _models(self) -> list[str]:
         if self._settings.serverless_mode:
-            return ["gemini-2.0-flash-lite"]
+            return ["gemini-2.0-flash-lite", "gemini-2.0-flash"]
 
         seen: set[str] = set()
         result: list[str] = []
@@ -57,10 +57,16 @@ class ScenarioGenerator:
         style_hint = STYLE_PRESETS[style.value]
         count = self._settings.slides_count
 
+        caption_lang = "русский" if language == "ru" else "английский"
         prompt = f"""
 Придумай нейрокарусель из {count} слайдов на тему: «{topic}».
-Один общий сюжет от обложки до финала. Язык caption: {language}.
-image_prompt — на английском, стиль: {style_hint}.
+Один связный сюжет от обложки до финала.
+
+caption — на {caption_lang}, конкретно про эту тему (факты, советы, примеры, цифры).
+Запрещены общие фразы без содержания: «первый ключевой момент», «разберём глубже»,
+«на слуху», «листай карусель», «поделись в комментариях».
+В каждом caption явно отрази тему или её часть; до 120 символов; без эмодзи.
+image_prompt — на английском, сцена про тему, стиль: {style_hint}, no text.
 
 Верни ТОЛЬКО JSON-массив из {count} объектов:
 [{{"slide":1,"caption":"...","image_prompt":"..."}}, ...]
@@ -77,7 +83,7 @@ image_prompt — на английском, стиль: {style_hint}.
 
         last_status: int | None = None
         models = self._models()
-        retries = 1 if self._settings.serverless_mode else self._settings.gemini_retry_count
+        retries = 2 if self._settings.serverless_mode else self._settings.gemini_retry_count
 
         for model in models:
             url = gemini_url(model, self._settings.gemini_key)
@@ -97,6 +103,17 @@ image_prompt — на английском, стиль: {style_hint}.
                     if r.status_code == 429:
                         hit_429 = True
                         if self._settings.serverless_mode:
+                            if attempt < retries:
+                                wait = min(4.0, self._settings.gemini_retry_base_delay * attempt)
+                                logger.warning(
+                                    "Gemini 429 on %s, retry %d/%d in %.1fs",
+                                    model,
+                                    attempt,
+                                    retries,
+                                    wait,
+                                )
+                                await asyncio.sleep(wait)
+                                continue
                             logger.warning("Gemini 429 on %s — fallback scenario", model)
                             raise GeminiRateLimitError("Gemini rate limit (429)")
                         wait = min(20.0, self._settings.gemini_retry_base_delay * (2 ** attempt))
@@ -119,6 +136,10 @@ image_prompt — на английском, стиль: {style_hint}.
                     if exc.response.status_code == 429:
                         hit_429 = True
                         if self._settings.serverless_mode:
+                            if attempt < retries:
+                                wait = min(4.0, self._settings.gemini_retry_base_delay * attempt)
+                                await asyncio.sleep(wait)
+                                continue
                             raise GeminiRateLimitError("Gemini rate limit (429)")
                         wait = min(20.0, self._settings.gemini_retry_base_delay * (2 ** attempt))
                         await asyncio.sleep(wait)
