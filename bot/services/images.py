@@ -78,12 +78,16 @@ class ImageGenerator:
 
         return None
 
+    def _pollinations_timeout(self) -> float:
+        return 35.0 if self._settings.serverless_mode else 60.0
+
     async def _generate_pollinations(self, prompt: str) -> bytes | None:
-        encoded = urllib.parse.quote(prompt)
+        encoded = urllib.parse.quote(prompt[:500])
         url = POLLINATIONS_URL.format(prompt=encoded)
+        timeout = self._pollinations_timeout()
         try:
-            logger.info("Pollinations fallback: %s", prompt[:60])
-            r = await self._http.get(url, timeout=60, follow_redirects=True)
+            logger.info("Pollinations: %s (timeout=%.0fs)", prompt[:60], timeout)
+            r = await self._http.get(url, timeout=timeout, follow_redirects=True)
             if r.status_code == 200 and len(r.content) > 1000:
                 return r.content
         except Exception as exc:

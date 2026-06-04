@@ -166,7 +166,7 @@ class UpdateRouter:
 
         if data == "carousel_draw":
             # Сразу отвечаем Telegram (<30 сек), иначе «query is too old»
-            await self._tg.answer_callback_query(query_id, "Рисую порцию…")
+            await self._tg.answer_callback_query(query_id, "Рисую слайд…")
             await self._carousel.draw_next_batch(chat_id)
             return
 

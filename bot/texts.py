@@ -17,7 +17,7 @@ def welcome_text(style_label: str, text_mode_label: str) -> str:
 • <i>В подписи</i> — текст под фото в Telegram (как раньше)
 • <i>На слайде</i> — текст рисуется на картинке (Pillow)
 
-Сценарий на 8 слайдов · 4 порции по 2 картинки 🎨
+Сценарий на 7 слайдов · по 1 картинке за шаг 🎨
 """.strip()
 
 HELP_TEXT = """
@@ -31,9 +31,9 @@ HELP_TEXT = """
 
 <b>Как создать карусель:</b>
 Просто отправь тему текстом. Бот сам:
-1. Сгенерирует сценарий из 8 слайдов (Gemini)
-2. Нарисует картинки (Stable Diffusion XL)
-3. Отправит медиагруппу в Telegram
+1. Сгенерирует сценарий из 7 слайдов (Gemini)
+2. Нарисует картинки по одной (меньше нагрузка на сервер)
+3. Отправит каждый слайд в Telegram
 
 <b>Стили:</b>
 {styles}
@@ -122,11 +122,13 @@ def scenario_timeout() -> str:
 
 
 def _batch_info(total: int, batch_size: int) -> str:
+    if batch_size == 1:
+        return f"{total} шагов · по 1 картинке"
     batches = (total + batch_size - 1) // batch_size
     return f"{batches} порции по {batch_size}"
 
 
-def scenario_ready_fallback(total: int, topic: str, batch_size: int = 2) -> str:
+def scenario_ready_fallback(total: int, topic: str, batch_size: int = 1) -> str:
     short = topic if len(topic) <= 80 else topic[:77] + "…"
     return (
         f"⚡ Gemini перегружен — сценарий на <b>{total}</b> слайдов (упрощённый).\n"
@@ -135,17 +137,26 @@ def scenario_ready_fallback(total: int, topic: str, batch_size: int = 2) -> str:
     )
 
 
-def scenario_ready(total: int, topic: str, batch_size: int = 2) -> str:
+def scenario_ready(total: int, topic: str, batch_size: int = 1) -> str:
     short = topic if len(topic) <= 80 else topic[:77] + "…"
+    if batch_size == 1:
+        action = f"Нажми кнопку — нарисую <b>слайд 1</b> ({_batch_info(total, batch_size)})."
+    else:
+        end = min(batch_size, total)
+        action = (
+            f"Нажми кнопку — нарисую слайды 1–{end} "
+            f"({_batch_info(total, batch_size)})."
+        )
     return (
         f"✅ Сценарий на <b>{total}</b> слайдов готов!\n"
         f"Тема: <i>{short}</i>\n\n"
-        f"Нажми кнопку — нарисую слайды 1–{min(batch_size, total)} "
-        f"({_batch_info(total, batch_size)})."
+        f"{action}"
     )
 
 
 def draw_batch_prompt(slide_from: int, slide_to: int) -> str:
+    if slide_from == slide_to:
+        return f"Готов нарисовать слайд <b>{slide_from}</b> 👇"
     return f"Готов нарисовать слайды <b>{slide_from}–{slide_to}</b> 👇"
 
 
@@ -219,7 +230,7 @@ def timeout_error(slides: int) -> str:
 
 
 def serverless_mode_hint() -> str:
-    return "☁️ 8 слайдов · 4 порции по 2 картинки · один сценарий."
+    return "☁️ 7 слайдов · по 1 картинке · один сценарий."
 
 
 def batch_progress(
@@ -230,6 +241,8 @@ def batch_progress(
     slide_to: int,
     total_slides: int,
 ) -> str:
+    if slide_from == slide_to:
+        return f"🖼 Рисую слайд <b>{slide_from}/{total_slides}</b>..."
     return (
         f"🖼 Порция <b>{batch_num}/{total_batches}</b> "
         f"(слайды {slide_from}–{slide_to} из {total_slides})..."
@@ -243,6 +256,11 @@ def batch_pause(
     next_from: int,
     next_to: int,
 ) -> str:
+    if next_from == next_to:
+        return (
+            f"✅ Готов слайд <b>{done_through}</b> из {total}.\n"
+            f"Далее: слайд <b>{next_from}</b> (тот же сценарий)."
+        )
     return (
         f"✅ Готово слайдов 1–{done_through} из {total}.\n"
         f"Осталось: {next_from}–{next_to} (тот же сценарий)."
@@ -250,11 +268,16 @@ def batch_pause(
 
 
 def batch_continue_prompt(slide_from: int, slide_to: int) -> str:
+    if slide_from == slide_to:
+        return f"Нажми кнопку — дорисую слайд <b>{slide_from}</b> 👇"
     return f"Нажми кнопку — дорисую слайды <b>{slide_from}–{slide_to}</b> 👇"
 
 
 def batch_images_failed(range_label: str) -> str:
-    return f"😔 Не удалось нарисовать порцию ({range_label}). Попробуй «Продолжить» или новую тему."
+    return (
+        f"😔 Слайд {range_label}: картинка не сгенерировалась или не отправилась в Telegram.\n"
+        "Нажми кнопку ещё раз или отправь новую тему."
+    )
 
 
 def success_batches(total: int) -> str:

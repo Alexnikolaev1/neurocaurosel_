@@ -76,7 +76,9 @@ class TelegramClient:
             r = await client.post(self._url("sendMediaGroup"), files=multipart)
         data = r.json()
         if not data.get("ok"):
-            logger.error("sendMediaGroup failed: %s", data)
+            logger.error("sendMediaGroup failed: %s", data.get("description", data))
+        else:
+            logger.info("sendMediaGroup ok chat=%s count=%d", chat_id, len(media))
         return data
 
     async def send_photo(
@@ -99,7 +101,9 @@ class TelegramClient:
             )
         data = r.json()
         if not data.get("ok"):
-            logger.warning("sendPhoto error: %s", data.get("description", data))
+            logger.error("sendPhoto failed chat=%s: %s", chat_id, data.get("description", data))
+        else:
+            logger.info("sendPhoto ok chat=%s", chat_id)
         return data
 
     async def send_chat_action(self, chat_id: int, action: str = "upload_photo") -> None:

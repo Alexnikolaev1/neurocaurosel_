@@ -54,7 +54,7 @@ def deserialize_session(raw: str) -> CarouselSession | None:
             slides=slides,
             status_message_id=int(data["status_message_id"]),
             next_index=int(data.get("next_index", 0)),
-            batch_size=int(data.get("batch_size", 2)),
+            batch_size=int(data.get("batch_size", 1)),
             text_mode=TextMode.from_value(data.get("text_mode")),
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError):

@@ -72,13 +72,12 @@ def retry_keyboard() -> dict:
 
 
 def draw_batch_keyboard(slide_from: int, slide_to: int) -> dict:
+    if slide_from == slide_to:
+        label = f"🖼 Нарисовать слайд {slide_from}"
+    else:
+        label = f"🖼 Нарисовать слайды {slide_from}–{slide_to}"
     return {
-        "inline_keyboard": [
-            [{
-                "text": f"🖼 Нарисовать слайды {slide_from}–{slide_to}",
-                "callback_data": "carousel_draw",
-            }],
-        ]
+        "inline_keyboard": [[{"text": label, "callback_data": "carousel_draw"}]],
     }
 
 

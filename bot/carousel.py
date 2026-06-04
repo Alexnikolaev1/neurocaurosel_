@@ -189,10 +189,11 @@ class CarouselOrchestrator:
         await save_session(session)
 
         if sent == 0:
+            label = str(from_n) if from_n == to_n else f"{from_n}–{to_n}"
             await self._tg.edit_message(
                 session.chat_id,
                 session.status_message_id,
-                texts.batch_images_failed(f"{from_n}–{to_n}"),
+                texts.batch_images_failed(label),
             )
             return
 
@@ -270,34 +271,53 @@ class CarouselOrchestrator:
         if not images:
             return 0
 
-        await self._send_batch_as_group(
-            session.chat_id, images, total, session.text_mode
-        )
+        ok = await self._send_slides(session.chat_id, images, total, session.text_mode)
+        if not ok:
+            logger.error("Telegram send failed chat=%s slides=%s", session.chat_id, batch[0].number)
+            return 0
+
         session.advance(len(batch))
         return len(images)
 
-    async def _send_batch_as_group(
+    def _slide_caption(
+        self,
+        slide: Slide,
+        total_slides: int,
+        text_mode: TextMode,
+    ) -> str:
+        if text_mode == TextMode.TEXT_ON_IMAGE:
+            return f"<b>{slide.number}/{total_slides}</b> · текст на картинке"[:1024]
+        return f"<b>{slide.number}/{total_slides}</b>\n{slide.caption}"[:1024]
+
+    async def _send_slides(
         self,
         chat_id: int,
         items: list[tuple[Slide, bytes]],
         total_slides: int,
         text_mode: TextMode,
-    ) -> None:
+    ) -> bool:
+        """Одно фото — sendPhoto; 2+ — sendMediaGroup (Telegram: группа от 2 шт.)."""
+        if len(items) == 1:
+            slide, data = items[0]
+            result = await self._tg.send_photo(
+                chat_id,
+                data,
+                self._slide_caption(slide, total_slides, text_mode),
+            )
+            return bool(result.get("ok"))
+
         media: list[dict[str, Any]] = []
         files: dict[str, bytes] = {}
 
         for i, (slide, data) in enumerate(items):
             field = f"b{i}"
             files[field] = data
-            if text_mode == TextMode.TEXT_ON_IMAGE:
-                caption = f"<b>{slide.number}/{total_slides}</b> · текст на картинке"[:1024]
-            else:
-                caption = f"<b>{slide.number}/{total_slides}</b>\n{slide.caption}"[:1024]
             media.append({
                 "type": "photo",
                 "media": f"attach://{field}",
-                "caption": caption,
+                "caption": self._slide_caption(slide, total_slides, text_mode),
                 "parse_mode": "HTML",
             })
 
-        await self._tg.send_media_group(chat_id, media, files)
+        result = await self._tg.send_media_group(chat_id, media, files)
+        return bool(result.get("ok"))

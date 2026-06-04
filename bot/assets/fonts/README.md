@@ -1,9 +1,12 @@
-# Шрифт для текста на слайде
+# Шрифты для режима «Текст на слайде»
 
-Для режима «Текст на слайде» нужен **DejaVu Sans Bold** с кириллицей.
+В репозитории должен лежать **`NotoSans-Bold.ttf`** (кириллица + латиница).
 
-1. Скачай [dejavu-fonts-ttf-2.37.zip](https://downloads.sourceforge.net/dejavu/dejavu-fonts-ttf-2.37.zip)
-2. Положи `ttf/DejaVuSans-Bold.ttf` в эту папку как `DejaVuSans-Bold.ttf`
+Если файла нет, скачай:
 
-На Vercel (Linux) при отсутствии файла используется системный путь  
-`/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf`.
+```bash
+curl -fsSL -o bot/assets/fonts/NotoSans-Bold.ttf \
+  "https://github.com/notofonts/noto-fonts/raw/main/hinted/ttf/NotoSans/NotoSans-Bold.ttf"
+```
+
+Без этого файла на Vercel текст на слайде не отображается (только «квадратики»).

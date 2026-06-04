@@ -82,7 +82,7 @@ class CarouselSession:
     slides: list[Slide]
     status_message_id: int
     next_index: int = 0
-    batch_size: int = 2
+    batch_size: int = 1
     text_mode: TextMode = TextMode.CAPTION_ONLY
 
     @property
