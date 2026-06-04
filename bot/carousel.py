@@ -65,6 +65,24 @@ class CarouselOrchestrator:
                 await self._tg.edit_message(
                     chat_id, status_message_id, texts.scenario_progress()
                 )
+
+                if self._settings.skip_gemini:
+                    logger.info("SKIP_GEMINI=1 — template scenario chat=%s", chat_id)
+                    slides = generate_fallback_scenario(
+                        job.topic,
+                        self._settings.slides_count,
+                        language=job.language,
+                        style=job.style,
+                    )
+                    await self._finish_scenario(
+                        job,
+                        status_message_id,
+                        slides,
+                        used_fallback=False,
+                        template_scenario=True,
+                    )
+                    return
+
                 gemini = ScenarioGenerator(self._settings, http)
 
                 try:
@@ -113,6 +131,7 @@ class CarouselOrchestrator:
         slides: list[Slide],
         *,
         used_fallback: bool,
+        template_scenario: bool = False,
     ) -> None:
         session = CarouselSession(
             chat_id=job.chat_id,
@@ -128,11 +147,12 @@ class CarouselOrchestrator:
         logger.info("Session saved (%s) chat=%s slides=%d", storage_mode(), job.chat_id, len(slides))
 
         bs = session.batch_size
-        ready_text = (
-            texts.scenario_ready_fallback(session.total, job.topic, bs)
-            if used_fallback
-            else texts.scenario_ready(session.total, job.topic, bs)
-        )
+        if template_scenario:
+            ready_text = texts.scenario_ready_template(session.total, job.topic, bs)
+        elif used_fallback:
+            ready_text = texts.scenario_ready_fallback(session.total, job.topic, bs)
+        else:
+            ready_text = texts.scenario_ready(session.total, job.topic, bs)
         await self._tg.edit_message(job.chat_id, status_message_id, ready_text)
 
         end = min(session.batch_size, session.total)
@@ -214,7 +234,11 @@ class CarouselOrchestrator:
 
         if sent == 0:
             label = str(from_n) if from_n == to_n else f"{from_n}–{to_n}"
-            fail_text = texts.batch_images_failed(label, images_svc.last_trace)
+            fail_text = texts.batch_images_failed(
+                label,
+                images_svc.last_trace,
+                pollinations_configured=bool(self._settings.pollinations_api_key),
+            )
             await self._tg.edit_message(
                 session.chat_id,
                 session.status_message_id,

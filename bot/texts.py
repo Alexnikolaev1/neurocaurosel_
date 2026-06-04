@@ -128,13 +128,13 @@ def _batch_info(total: int, batch_size: int) -> str:
     return f"{batches} порции по {batch_size}"
 
 
+def scenario_ready_template(total: int, topic: str, batch_size: int = 1) -> str:
+    """Шаблонный сценарий (без вызова Gemini на Vercel)."""
+    return scenario_ready(total, topic, batch_size)
+
+
 def scenario_ready_fallback(total: int, topic: str, batch_size: int = 1) -> str:
-    short = topic if len(topic) <= 80 else topic[:77] + "…"
-    return (
-        f"⚡ Gemini перегружен — сценарий на <b>{total}</b> слайдов (упрощённый).\n"
-        f"Тема: <i>{short}</i>\n\n"
-        f"Сюжет единый · {_batch_info(total, batch_size)}. Нажми кнопку ниже."
-    )
+    return scenario_ready_template(total, topic, batch_size)
 
 
 def scenario_ready(total: int, topic: str, batch_size: int = 1) -> str:
@@ -273,18 +273,41 @@ def batch_continue_prompt(slide_from: int, slide_to: int) -> str:
     return f"Нажми кнопку — дорисую слайды <b>{slide_from}–{slide_to}</b> 👇"
 
 
-def batch_images_failed(range_label: str, trace: str = "") -> str:
+def batch_images_failed(
+    range_label: str,
+    trace: str = "",
+    *,
+    pollinations_configured: bool = False,
+) -> str:
+    from bot.utils import escape_html
+
+    hints: list[str] = []
+    if "gen-poll:no-key" in trace or not pollinations_configured:
+        hints.append(
+            "В Vercel добавь <b>POLLINATIONS_API_KEY</b> (имя точно так) "
+            "и нажми <b>Redeploy</b> — Save без деплоя не подхватывает ключ."
+        )
+    if ":401" in trace:
+        hints.append(
+            "<b>HF_API_KEY</b> не принят (401). Новый токен на huggingface.co → "
+            "Fine-grained → Inference Providers."
+        )
+    if "gen-poll:" in trace and ":401" in trace:
+        hints.append("Ключ Pollinations неверный — проверь на enter.pollinations.ai.")
+    if "402" in trace:
+        hints.append("Старый image.pollinations.ai не работает — нужен ключ gen.pollinations.ai.")
+
+    hint_block = "\n".join(f"• {h}" for h in hints) if hints else (
+        "Проверь <b>POLLINATIONS_API_KEY</b> или <b>HF_API_KEY</b> в Vercel."
+    )
     detail = ""
     if trace:
-        from bot.utils import escape_html
+        detail = f"\n\n<i>Технически:</i>\n<code>{escape_html(trace[:350])}</code>"
 
-        detail = f"\n\n<i>Диагностика:</i>\n<code>{escape_html(trace[:400])}</code>"
     return (
-        f"😔 Слайд {range_label}: не удалось сгенерировать картинку.{detail}\n\n"
-        "Vercel: <b>POLLINATIONS_ONLY=0</b>, ключи "
-        "<b>HF_API_KEY</b> (Inference Providers) и/или "
-        "<b>POLLINATIONS_API_KEY</b> (enter.pollinations.ai).\n"
-        "Нажми кнопку ещё раз."
+        f"😔 Слайд {range_label}: картинка не сгенерировалась.{detail}\n\n"
+        f"{hint_block}\n\n"
+        "Исправь в Vercel → Redeploy → нажми кнопку снова."
     )
 
 

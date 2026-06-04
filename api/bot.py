@@ -42,16 +42,25 @@ def _load_bot_class():
 def _get_bot():
     global _bot
     if _bot is None:
+        from bot.config import pollinations_key_from_env
+
         token = os.environ.get("TELEGRAM_TOKEN", "")
         gemini_key = os.environ.get("GEMINI_API_KEY", "")
         hf_key = os.environ.get("HF_API_KEY", "")
+        poll_key = pollinations_key_from_env()
         missing = [n for n, v in (
             ("TELEGRAM_TOKEN", token),
             ("GEMINI_API_KEY", gemini_key),
-            ("HF_API_KEY", hf_key),
         ) if not v]
+        if not hf_key and not poll_key:
+            missing.append("HF_API_KEY or POLLINATIONS_API_KEY")
         if missing:
             raise RuntimeError(f"Missing env on Vercel: {', '.join(missing)}")
+        logger.info(
+            "Bot env poll_key=%s hf_key=%s",
+            f"len={len(poll_key)}" if poll_key else "MISSING",
+            f"len={len(hf_key)}" if hf_key else "MISSING",
+        )
         BotClass = _load_bot_class()
         _bot = BotClass(token=token, gemini_key=gemini_key, hf_key=hf_key)
     return _bot

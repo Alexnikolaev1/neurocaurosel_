@@ -5,7 +5,21 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-BUILD_TAG = "image-v5-hub"
+BUILD_TAG = "image-v6-poll"
+
+
+def pollinations_key_from_env() -> str:
+    """Несколько имён переменной — на Vercel часто опечатка в имени."""
+    for name in (
+        "POLLINATIONS_API_KEY",
+        "POLLINATIONS_KEY",
+        "POLLEN_API_KEY",
+        "POLLINATIONS_TOKEN",
+    ):
+        value = os.getenv(name, "").strip()
+        if value:
+            return value
+    return ""
 
 
 def _is_vercel() -> bool:
@@ -38,6 +52,7 @@ class Settings:
     serverless_mode: bool = False
     pollinations_only: bool = False
     pollinations_api_key: str = ""
+    skip_gemini: bool = False
     function_timeout_sec: float = 55.0
 
     @classmethod
@@ -82,7 +97,8 @@ def build_settings(
         gemini_models=tuple(m.strip() for m in models_raw.split(",") if m.strip()),
         serverless_mode=serverless,
         pollinations_only=pollinations_only,
-        pollinations_api_key=os.getenv("POLLINATIONS_API_KEY", "").strip(),
+        pollinations_api_key=pollinations_key_from_env(),
+        skip_gemini=os.getenv("SKIP_GEMINI", "1" if serverless else "0") == "1",
         hf_between_delay=between_delay,
         function_timeout_sec=timeout,
         image_max_size=int(os.getenv("IMAGE_MAX_SIZE", "1024" if serverless else "1280")),
