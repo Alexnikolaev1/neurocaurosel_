@@ -26,6 +26,10 @@ _FONT_CANDIDATES = (
 
 _CYRILLIC_PROBE = "Абв"
 
+# Нижняя плашка: не больше ~36% высоты кадра; шрифт подбирается вниз, если не влезает.
+_MAX_BAR_HEIGHT_RATIO = 0.36
+_MAX_TEXT_LINES = 8
+
 # Читаемые цвета текста на тёмной плашке (по номеру слайда)
 SLIDE_TEXT_COLORS: tuple[tuple[int, int, int], ...] = (
     (255, 255, 255),   # белый
@@ -73,6 +77,8 @@ def _wrap_lines(
     text: str,
     font: ImageFont.FreeTypeFont,
     max_width: int,
+    *,
+    max_lines: int = _MAX_TEXT_LINES,
 ) -> list[str]:
     words = text.replace("\n", " ").split()
     if not words:
@@ -94,7 +100,71 @@ def _wrap_lines(
             current = word
     if current:
         lines.append(current)
-    return lines[:6]
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+        last = lines[-1]
+        while last and _text_width(last + "…", font) > max_width:
+            last = last[:-1]
+        lines[-1] = (last + "…") if last else "…"
+    return lines
+
+
+def _text_width(text: str, font: ImageFont.FreeTypeFont) -> int:
+    dummy = Image.new("RGB", (1, 1))
+    box = ImageDraw.Draw(dummy).textbbox((0, 0), text, font=font)
+    return box[2] - box[0]
+
+
+def _line_metrics(
+    lines: list[str],
+    font: ImageFont.FreeTypeFont,
+) -> list[int]:
+    measure = Image.new("RGB", (1, 1))
+    draw = ImageDraw.Draw(measure)
+    heights: list[int] = []
+    for line in lines:
+        box = draw.textbbox((0, 0), line, font=font)
+        heights.append(box[3] - box[1])
+    return heights
+
+
+def _fit_overlay_layout(
+    caption: str,
+    *,
+    width: int,
+    height: int,
+) -> tuple[ImageFont.FreeTypeFont, list[str], list[int], int, int, int]:
+    """Подбор шрифта и отступов: плашка компактная, текст влезает."""
+    pad_x = max(20, width // 26)
+    pad_y = max(12, height // 52)
+    max_text_w = width - 2 * pad_x
+    max_bar_h = max(int(height * _MAX_BAR_HEIGHT_RATIO), pad_y * 4)
+
+    base_size = max(28, width // 15)
+    min_size = max(18, width // 26)
+
+    best: tuple | None = None
+    for size in range(base_size, min_size - 1, -2):
+        font = _load_font(size)
+        lines = _wrap_lines(caption, font, max_text_w)
+        if not lines:
+            continue
+        line_heights = _line_metrics(lines, font)
+        line_gap = max(6, size // 6)
+        text_block_h = sum(line_heights) + line_gap * (len(lines) - 1)
+        bar_h = text_block_h + pad_y * 2
+        if bar_h <= max_bar_h:
+            best = (font, lines, line_heights, line_gap, pad_x, pad_y)
+            break
+
+    if best is None:
+        font = _load_font(min_size)
+        lines = _wrap_lines(caption, font, max_text_w)
+        line_heights = _line_metrics(lines, font)
+        line_gap = max(5, min_size // 6)
+        best = (font, lines, line_heights, line_gap, pad_x, pad_y)
+
+    return best
 
 
 def _draw_outlined_text(
@@ -134,41 +204,34 @@ def overlay_slide_text(
         img = img.convert("RGBA")
         width, height = img.size
 
-        pad_x = max(36, width // 20)
-        pad_y = max(36, height // 28)
-        font_size = max(44, width // 11)
-        font = _load_font(font_size)
-        max_text_w = width - 2 * pad_x
-        lines = _wrap_lines(caption, font, max_text_w)
+        font, lines, line_heights, line_gap, pad_x, pad_y = _fit_overlay_layout(
+            caption,
+            width=width,
+            height=height,
+        )
         if not lines:
             return image_data
 
-        measure = ImageDraw.Draw(img)
-        line_heights = []
-        for line in lines:
-            box = measure.textbbox((0, 0), line, font=font)
-            line_heights.append(box[3] - box[1])
-
-        line_gap = max(10, font_size // 5)
-        stroke = max(3, font_size // 16)
+        font_size = font.size
+        stroke = max(2, font_size // 18)
         text_block_h = sum(line_heights) + line_gap * (len(lines) - 1)
         bar_h = text_block_h + pad_y * 2
         bar_top = max(0, height - bar_h)
 
         overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
-        draw.rectangle((0, bar_top, width, height), fill=(8, 10, 18, 215))
+        draw.rectangle((0, bar_top, width, height), fill=(8, 10, 18, 200))
 
         badge = f"{slide_number}/{total_slides}"
-        badge_font = _load_font(max(24, font_size // 2))
+        badge_font = _load_font(max(18, font_size // 2))
         bb = draw.textbbox((0, 0), badge, font=badge_font)
         bw, bh = bb[2] - bb[0], bb[3] - bb[1]
-        bx1 = width - bw - pad_x - 16
-        by1 = pad_x
+        bx1 = width - bw - pad_x - 10
+        by1 = max(10, pad_x // 2)
         draw.rounded_rectangle(
-            (bx1 - 10, by1 - 6, width - pad_x, by1 + bh + 14),
-            radius=10,
-            fill=(0, 0, 0, 175),
+            (bx1 - 8, by1 - 4, width - pad_x, by1 + bh + 10),
+            radius=8,
+            fill=(0, 0, 0, 160),
         )
         _draw_outlined_text(
             draw,
