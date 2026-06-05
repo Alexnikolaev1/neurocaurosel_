@@ -6,7 +6,7 @@ import json
 import os
 from dataclasses import dataclass
 
-BUILD_TAG = "v10-gemini-retries"
+BUILD_TAG = "v11-gemini-retry-btn"
 
 
 def pollinations_key_from_env() -> str:
@@ -33,6 +33,11 @@ def deployment_status_json() -> str:
         "pollinations_key_length": len(poll),
         "poll_env_variable_names": poll_names,
         "hf_api_key_length": len(os.getenv("HF_API_KEY", "").strip()),
+        "gemini_api_key_length": len(os.getenv("GEMINI_API_KEY", "").strip()),
+        "gemini_models": os.getenv(
+            "GEMINI_MODELS",
+            "gemini-2.5-flash-lite,gemini-2.5-flash,gemini-2.0-flash-lite,gemini-2.0-flash",
+        ),
         "skip_gemini": os.getenv("SKIP_GEMINI", "(default 0 on Vercel)"),
         "pollinations_only": os.getenv("POLLINATIONS_ONLY", "0"),
         "vercel": bool(os.getenv("VERCEL") or os.getenv("VERCEL_ENV")),
@@ -66,8 +71,10 @@ class Settings:
     gemini_request_timeout: float = 60.0
     gemini_scenario_timeout: float = 0.0
     gemini_models: tuple[str, ...] = (
-        "gemini-2.0-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.5-flash",
         "gemini-2.0-flash-lite",
+        "gemini-2.0-flash",
     )
     serverless_mode: bool = False
     pollinations_only: bool = False
@@ -93,7 +100,7 @@ def build_settings(
 ) -> Settings:
     models_raw = os.getenv(
         "GEMINI_MODELS",
-        "gemini-2.0-flash,gemini-2.0-flash-lite",
+        "gemini-2.5-flash-lite,gemini-2.5-flash,gemini-2.0-flash-lite,gemini-2.0-flash",
     )
     vercel = _is_vercel()
     serverless = os.getenv("SERVERLESS_MODE", "1" if vercel else "0") == "1"

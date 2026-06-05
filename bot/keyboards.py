@@ -80,14 +80,21 @@ def draw_actions_keyboard(
     slide_to: int,
     *,
     redraw_slide: int | None = None,
+    retry_gemini: bool = False,
 ) -> dict:
     if slide_from == slide_to:
         draw_label = f"🖼 Нарисовать слайд {slide_from}"
     else:
         draw_label = f"🖼 Нарисовать слайды {slide_from}–{slide_to}"
-    rows: list[list[dict]] = [
-        [{"text": draw_label, "callback_data": "carousel_draw"}],
-    ]
+    rows: list[list[dict]] = []
+    if retry_gemini:
+        rows.append([
+            {
+                "text": "✨ Сценарий через Gemini",
+                "callback_data": "carousel_retry_gemini",
+            },
+        ])
+    rows.append([{"text": draw_label, "callback_data": "carousel_draw"}])
     if redraw_slide is not None:
         rows.append([
             {

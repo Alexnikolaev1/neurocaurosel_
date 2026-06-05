@@ -173,8 +173,85 @@ class CarouselOrchestrator:
         await self._tg.send_message(
             job.chat_id,
             f"{texts.draw_batch_prompt(1, end)}\n\n{texts.draw_hint_continue_text()}",
-            reply_markup=keyboards.draw_batch_keyboard(1, end),
+            reply_markup=keyboards.draw_actions_keyboard(
+                1,
+                end,
+                retry_gemini=used_fallback,
+            ),
         )
+
+    async def retry_gemini_scenario(self, chat_id: int) -> None:
+        session = await load_session(chat_id)
+        if not session:
+            await self._tg.send_message(chat_id, texts.session_not_found())
+            return
+        if session.next_index > 0:
+            await self._tg.send_message(
+                chat_id,
+                "Уже начали рисовать — для нового сценария Gemini отправь <b>новую тему</b>.",
+            )
+            return
+        if not self._jobs.try_acquire(chat_id):
+            await self._tg.send_message(chat_id, texts.job_in_progress())
+            return
+
+        budget = self._settings.function_timeout_sec - 4
+        scenario_timeout = (
+            min(self._settings.gemini_scenario_timeout, budget)
+            if self._settings.gemini_scenario_timeout > 0
+            else budget
+        )
+
+        try:
+            await self._tg.edit_message(
+                chat_id,
+                session.status_message_id,
+                texts.scenario_retry_progress(),
+            )
+            async with http_session(self._settings) as http:
+                gemini = ScenarioGenerator(self._settings, http)
+                try:
+                    slides = await asyncio.wait_for(
+                        gemini.generate(
+                            session.topic,
+                            language=session.language,
+                            style=session.style,
+                        ),
+                        timeout=scenario_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    await self._tg.edit_message(
+                        chat_id,
+                        session.status_message_id,
+                        texts.scenario_timeout(scenario_timeout),
+                    )
+                    return
+                except GeminiRateLimitError:
+                    await self._tg.send_message(chat_id, texts.scenario_rate_limit())
+                    return
+                except Exception:
+                    logger.exception("Gemini retry failed chat=%s", chat_id)
+                    await self._tg.send_message(chat_id, texts.scenario_error())
+                    return
+
+            session.slides = slides
+            session.next_index = 0
+            await save_session(session)
+            bs = session.batch_size
+            await self._tg.edit_message(
+                chat_id,
+                session.status_message_id,
+                texts.scenario_ready(session.total, session.topic, bs),
+            )
+            end = min(bs, session.total)
+            await self._tg.send_message(
+                chat_id,
+                f"{texts.draw_batch_prompt(1, end)}\n\n{texts.draw_hint_continue_text()}",
+                reply_markup=keyboards.draw_actions_keyboard(1, end),
+            )
+            logger.info("Gemini retry ok chat=%s slides=%d", chat_id, len(slides))
+        finally:
+            self._jobs.release(chat_id)
 
     async def draw_next_batch(self, chat_id: int) -> None:
         session = await load_session(chat_id)

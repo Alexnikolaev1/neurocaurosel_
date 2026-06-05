@@ -99,6 +99,10 @@ def scenario_progress() -> str:
     return "🎨 Генерирую сценарий..."
 
 
+def scenario_retry_progress() -> str:
+    return "✨ Повторно запрашиваю сценарий у Gemini…"
+
+
 def image_progress(current: int, total: int) -> str:
     filled = "▓" * current
     empty = "░" * (total - current)
@@ -144,9 +148,9 @@ def scenario_ready_fallback(total: int, topic: str, batch_size: int = 1) -> str:
     base = scenario_ready(total, topic, batch_size)
     return (
         f"{base}\n\n"
-        f"⚠️ <i>Gemini ответил «лимит запросов» (429) после нескольких попыток — "
-        f"временно отдал шаблон (общие фразы). Подожди 2–3 мин и снова отправь "
-        f"«{short}» — не жми тему много раз подряд.</i>"
+        f"⚠️ <i>Gemini ответил «лимит запросов» (429) — временно шаблон. "
+        f"Нажми <b>✨ Сценарий через Gemini</b> ниже (через 1–2 мин) или проверь "
+        f"квоту ключа на <a href=\"https://aistudio.google.com/\">AI Studio</a>.</i>"
     )
 
 

@@ -170,6 +170,11 @@ class UpdateRouter:
             await self._carousel.draw_next_batch(chat_id)
             return
 
+        if data == "carousel_retry_gemini":
+            await self._tg.answer_callback_query(query_id, "Запрашиваю Gemini…")
+            await self._carousel.retry_gemini_scenario(chat_id)
+            return
+
         if data.startswith("carousel_redraw:"):
             try:
                 slide_number = int(data.split(":", 1)[1])

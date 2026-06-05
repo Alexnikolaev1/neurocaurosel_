@@ -35,7 +35,12 @@ class ScenarioGenerator:
 
     def _models(self) -> list[str]:
         if self._settings.serverless_mode:
-            return ["gemini-2.0-flash-lite", "gemini-2.0-flash"]
+            return [
+                "gemini-2.5-flash-lite",
+                "gemini-2.5-flash",
+                "gemini-2.0-flash-lite",
+                "gemini-2.0-flash",
+            ]
 
         seen: set[str] = set()
         result: list[str] = []
@@ -82,7 +87,7 @@ image_prompt — на английском, сцена про тему, стил
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
                 "temperature": 0.8,
-                "maxOutputTokens": 3072 if self._settings.serverless_mode else 4096,
+                "maxOutputTokens": 2048 if self._settings.serverless_mode else 4096,
                 "responseMimeType": "application/json",
             },
         }
@@ -111,6 +116,7 @@ image_prompt — на английском, сцена про тему, стил
                         saw_429 = True
                         model_failed_429 = True
                         last_status = 429
+                        self._log_rate_limit(r, model)
                         if attempt < retries:
                             wait = self._retry_wait(attempt)
                             logger.warning(
@@ -161,6 +167,13 @@ image_prompt — на английском, сцена про тему, стил
         if last_status == 429 or saw_429:
             raise GeminiRateLimitError("Gemini rate limit (429)")
         raise GeminiError(f"Gemini failed (last HTTP {last_status})")
+
+    def _log_rate_limit(self, response: httpx.Response, model: str) -> None:
+        try:
+            detail = response.json()
+        except Exception:
+            detail = response.text[:400]
+        logger.warning("Gemini 429 detail model=%s: %s", model, detail)
 
     def _parse_response(self, data: dict, count: int) -> list[Slide]:
         raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
