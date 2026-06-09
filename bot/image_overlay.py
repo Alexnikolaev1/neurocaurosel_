@@ -33,7 +33,12 @@ _MAX_TEXT_LINES = 8
 
 def _bottom_inset(height: int) -> int:
     """Зазор между низом плашки и краем кадра + запас под обводку текста."""
-    return max(14, height // 42)
+    return max(22, height // 32)
+
+
+def _text_bottom_margin(stroke_width: int) -> int:
+    """Доп. запас под обводку и вынос букв (р, у, д) ниже baseline."""
+    return stroke_width * 2 + 6
 
 # Читаемые цвета текста на тёмной плашке (по номеру слайда)
 SLIDE_TEXT_COLORS: tuple[tuple[int, int, int], ...] = (
@@ -143,7 +148,7 @@ def _fit_overlay_layout(
 ) -> tuple[ImageFont.FreeTypeFont, list[str], list[int], int, int, int]:
     """Подбор шрифта и отступов: плашка компактная, текст влезает."""
     pad_x = max(20, width // 26)
-    pad_y = max(14, height // 48)
+    pad_y = max(16, height // 42)
     bottom_gap = _bottom_inset(height)
     max_text_w = width - 2 * pad_x
     max_bar_h = max(int(height * _MAX_BAR_HEIGHT_RATIO), pad_y * 4)
@@ -161,7 +166,7 @@ def _fit_overlay_layout(
         line_heights = _line_metrics(lines, font, stroke_width=stroke)
         line_gap = max(6, size // 6)
         text_block_h = sum(line_heights) + line_gap * (len(lines) - 1)
-        bar_h = text_block_h + pad_y * 2 + stroke
+        bar_h = text_block_h + pad_y * 2 + _text_bottom_margin(stroke)
         if bar_h <= max_bar_h:
             best = (font, lines, line_heights, line_gap, pad_x, pad_y)
             break
@@ -226,7 +231,7 @@ def overlay_slide_text(
         stroke = max(2, font_size // 18)
         bottom_gap = _bottom_inset(height)
         text_block_h = sum(line_heights) + line_gap * (len(lines) - 1)
-        bar_h = text_block_h + pad_y * 2 + stroke
+        bar_h = text_block_h + pad_y * 2 + _text_bottom_margin(stroke)
         bar_bottom = height - bottom_gap
         bar_top = max(0, bar_bottom - bar_h)
 
