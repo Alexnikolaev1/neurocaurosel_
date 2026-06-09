@@ -30,6 +30,11 @@ _CYRILLIC_PROBE = "Абв"
 _MAX_BAR_HEIGHT_RATIO = 0.36
 _MAX_TEXT_LINES = 8
 
+
+def _bottom_inset(height: int) -> int:
+    """Зазор между низом плашки и краем кадра + запас под обводку текста."""
+    return max(14, height // 42)
+
 # Читаемые цвета текста на тёмной плашке (по номеру слайда)
 SLIDE_TEXT_COLORS: tuple[tuple[int, int, int], ...] = (
     (255, 255, 255),   # белый
@@ -118,12 +123,14 @@ def _text_width(text: str, font: ImageFont.FreeTypeFont) -> int:
 def _line_metrics(
     lines: list[str],
     font: ImageFont.FreeTypeFont,
+    *,
+    stroke_width: int = 0,
 ) -> list[int]:
     measure = Image.new("RGB", (1, 1))
     draw = ImageDraw.Draw(measure)
     heights: list[int] = []
     for line in lines:
-        box = draw.textbbox((0, 0), line, font=font)
+        box = draw.textbbox((0, 0), line, font=font, stroke_width=stroke_width)
         heights.append(box[3] - box[1])
     return heights
 
@@ -136,7 +143,8 @@ def _fit_overlay_layout(
 ) -> tuple[ImageFont.FreeTypeFont, list[str], list[int], int, int, int]:
     """Подбор шрифта и отступов: плашка компактная, текст влезает."""
     pad_x = max(20, width // 26)
-    pad_y = max(12, height // 52)
+    pad_y = max(14, height // 48)
+    bottom_gap = _bottom_inset(height)
     max_text_w = width - 2 * pad_x
     max_bar_h = max(int(height * _MAX_BAR_HEIGHT_RATIO), pad_y * 4)
 
@@ -146,21 +154,23 @@ def _fit_overlay_layout(
     best: tuple | None = None
     for size in range(base_size, min_size - 1, -2):
         font = _load_font(size)
+        stroke = max(2, size // 18)
         lines = _wrap_lines(caption, font, max_text_w)
         if not lines:
             continue
-        line_heights = _line_metrics(lines, font)
+        line_heights = _line_metrics(lines, font, stroke_width=stroke)
         line_gap = max(6, size // 6)
         text_block_h = sum(line_heights) + line_gap * (len(lines) - 1)
-        bar_h = text_block_h + pad_y * 2
+        bar_h = text_block_h + pad_y * 2 + stroke
         if bar_h <= max_bar_h:
             best = (font, lines, line_heights, line_gap, pad_x, pad_y)
             break
 
     if best is None:
         font = _load_font(min_size)
+        stroke = max(2, min_size // 18)
         lines = _wrap_lines(caption, font, max_text_w)
-        line_heights = _line_metrics(lines, font)
+        line_heights = _line_metrics(lines, font, stroke_width=stroke)
         line_gap = max(5, min_size // 6)
         best = (font, lines, line_heights, line_gap, pad_x, pad_y)
 
@@ -214,13 +224,15 @@ def overlay_slide_text(
 
         font_size = font.size
         stroke = max(2, font_size // 18)
+        bottom_gap = _bottom_inset(height)
         text_block_h = sum(line_heights) + line_gap * (len(lines) - 1)
-        bar_h = text_block_h + pad_y * 2
-        bar_top = max(0, height - bar_h)
+        bar_h = text_block_h + pad_y * 2 + stroke
+        bar_bottom = height - bottom_gap
+        bar_top = max(0, bar_bottom - bar_h)
 
         overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
-        draw.rectangle((0, bar_top, width, height), fill=(8, 10, 18, 200))
+        draw.rectangle((0, bar_top, width, bar_bottom), fill=(8, 10, 18, 200))
 
         badge = f"{slide_number}/{total_slides}"
         badge_font = _load_font(max(18, font_size // 2))
